@@ -1,6 +1,6 @@
 # localai.sh
 
-> **Local AI Environment Manager** — A single-file Bash script for spinning up isolated, modular AI development and runtime environments using [Podman](https://podman.io/) and [Distrobox](https://distrobox.it/).
+> **Local AI Environment Manager** — A modular Bash tool suite for spinning up isolated, modular AI development and runtime environments using [Podman](https://podman.io/) and [Distrobox](https://distrobox.it/).
 
 [![License: BSD 2-Clause](https://img.shields.io/badge/License-BSD%202--Clause-blue.svg)](https://opensource.org/licenses/BSD-2-Clause)
 ![Shell: Bash](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -36,7 +36,7 @@
 
 ## Overview
 
-`localai.sh` is a **single-file** Bash administration script that lets you create fully isolated AI workspaces on your local machine. Each workspace is a [Distrobox](https://distrobox.it/) container built on **Ubuntu 26.04** with its own home directory, keeping your host system clean and your AI projects reproducible.
+`localai.sh` is a modular Bash environment management tool that lets you create fully isolated AI workspaces on your local machine. Each workspace is a [Distrobox](https://distrobox.it/) container built on **Ubuntu 26.04** with its own home directory, keeping your host system clean and your AI projects reproducible.
 
 All containers are NVIDIA-passthrough enabled out of the box. Model files, outputs, logs, and virtual environments are stored in a dedicated directory that **survives container deletion**.
 
@@ -44,7 +44,7 @@ All containers are NVIDIA-passthrough enabled out of the box. Model files, outpu
 
 ## Features
 
-- 🗂️ **Single-file architecture** — everything lives in `localai.sh`, no external scripts
+- 🗂️ **Modular architecture** — clean separation of core dispatcher, container managers, and tool modules in `bin/`
 - 🔒 **Isolated home directories** — each container gets its own `~/.local/containers/<name>/`
 - 🔌 **Modular tool system** — add new AI tools by implementing 3 functions
 - 🔁 **Idempotent operations** — safe to re-run install commands multiple times
@@ -235,7 +235,7 @@ localai.sh start my-ai-lab ollama    # API available at http://localhost:11434
 localai.sh start image-gen comfyui   # Web UI available at http://localhost:8188
 ```
 
-Logs are written to `~/.local/containers/<name>/.run/<tool>.log`.
+Logs are written to `log/<container>/<tool>.log`.
 
 ---
 
@@ -301,12 +301,14 @@ Type `exit` to return to the host shell.
 
 ## Data Persistence
 
-> **Your data is safe.** `localai.sh container rm` only runs `distrobox rm` — it never touches `~/.local/containers/<name>/`.
+> **Your data is safe.** `localai.sh container rm` only runs `distrobox rm` — it never touches `~/.local/containers/<name>/` unless the `-p` / `--purge` flag is provided.
 
 This means:
 - Downloaded AI models survive container deletion
 - Virtual environments and installed packages survive container deletion
 - You can recreate a container and instantly resume where you left off
+
+> **Note on Moving Directories:** Python virtual environments (`.venv`) store absolute paths internally. If you move `~/.local/containers` to a different disk or symlink it elsewhere, activate the virtualenv and update paths or reinstall the tool environment.
 
 ---
 
@@ -321,7 +323,7 @@ This means:
 | Installer | Official `https://ollama.com/install.sh` |
 | API port | `11434` |
 | Models dir | `~/.local/containers/<name>/.ollama/models/` |
-| Logs | `~/.local/containers/<name>/.run/ollama.log` |
+| Logs | `log/<container>/ollama.log` |
 
 **Common commands inside the container:**
 ```bash
@@ -343,7 +345,7 @@ ollama list
 | Web UI port | `8188` |
 | PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
 | Models dir | `~/.local/containers/<name>/comfyui/models/checkpoints/` |
-| Logs | `~/.local/containers/<name>/.run/comfyui.log` |
+| Logs | `log/<container>/comfyui.log` |
 
 **Drop your `.safetensors` or `.ckpt` checkpoint files into:**
 ```
@@ -372,7 +374,7 @@ start_mytool() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
     local pid_f;  pid_f="$(pid_file "${container}" "mytool")"
-    local log_f="${home_dir}/.run/mytool.log"
+    local log_f="${LOG_DIR}/${container}/mytool.log"
 
     mkdir -p "${home_dir}/.run"
 

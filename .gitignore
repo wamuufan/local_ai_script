@@ -1,0 +1,10 @@
+# Logs
+log/
+*.log
+*.jsonl
+
+# Runtime & Temp files
+.run/
+*.tmp
+*.swp
+.DS_Store
