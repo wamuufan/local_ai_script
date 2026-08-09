@@ -22,7 +22,8 @@
 # ==============================================================================
 
 set -euo pipefail
-export LC_ALL=C
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
 # Find script directory reliably (supporting macOS and Linux)
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
