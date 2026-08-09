@@ -172,6 +172,7 @@ cmd_container_rm() {
 
     log_header "Removing container: ${name}"
     assert_container_exists "${name}"
+    _acquire_container_lock "${name}"
 
     if [[ "${purge_data}" -eq 1 ]]; then
         log_warn "WARNING: --purge flag specified! This will PERMANENTLY DELETE:"

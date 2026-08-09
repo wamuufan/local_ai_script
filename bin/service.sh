@@ -122,9 +122,50 @@ status_service_in_container() {
     fi
 }
 
+is_tool_installed_in_container() {
+    local container="$1" tool="$2"
+    local home_dir="${BASE_DIR}/${container}"
+
+    local tool_lower="${tool,,}"
+    local tool_upper="${tool^^}"
+
+    if [[ -d "${home_dir}/.${tool}" ]] || \
+       [[ -d "${home_dir}/${tool}" ]] || \
+       [[ -d "${home_dir}/.${tool_lower}" ]] || \
+       [[ -d "${home_dir}/${tool_lower}" ]] || \
+       [[ -d "${home_dir}/.${tool_upper}" ]] || \
+       [[ -d "${home_dir}/${tool_upper}" ]] || \
+       [[ -f "${home_dir}/.${tool}.env" ]] || \
+       [[ -f "${home_dir}/.${tool_lower}.env" ]] || \
+       [[ -f "${home_dir}/.${tool_lower}.user.env" ]]; then
+        return 0
+    fi
+
+    case "${tool_lower}" in
+        ollama)
+            [[ -d "${home_dir}/.ollama" ]]
+            ;;
+        comfyui)
+            [[ -d "${home_dir}/comfyui" || -d "${home_dir}/ComfyUI" || -d "${home_dir}/.comfyui" ]]
+            ;;
+        openwebui)
+            [[ -d "${home_dir}/.openwebui" || -d "${home_dir}/open-webui" ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 get_tool_status_in_container() {
     local container="$1"
     local tool_name="$2"
+
+    if ! is_tool_installed_in_container "${container}" "${tool_name}"; then
+        echo "not installed"
+        return 0
+    fi
+
     local pid_f; pid_f="$(pid_file "${container}" "${tool_name}")"
 
     if [[ -f "${pid_f}" ]]; then
@@ -185,15 +226,24 @@ status_all_containers_tree() {
         local num_tools=${#tools[@]}
         local t_idx=0
 
-        if (( num_tools == 0 )); then
-            printf "%s└── ${DIM}(no supported tools found)${RESET}\n" "${c_sub_prefix}"
+        local installed_tools=()
+        for tool in "${tools[@]}"; do
+            if is_tool_installed_in_container "${container}" "${tool}"; then
+                installed_tools+=("${tool}")
+            fi
+        done
+
+        local num_installed=${#installed_tools[@]}
+        if (( num_installed == 0 )); then
+            printf "%s└── ${DIM}(no tools installed)${RESET}\n" "${c_sub_prefix}"
             continue
         fi
 
-        for tool in "${tools[@]}"; do
+        local t_idx=0
+        for tool in "${installed_tools[@]}"; do
             t_idx=$((t_idx + 1))
             local t_prefix="├── "
-            if (( t_idx == num_tools )); then
+            if (( t_idx == num_installed )); then
                 t_prefix="└── "
             fi
 
@@ -201,6 +251,8 @@ status_all_containers_tree() {
             local st_color="${DIM}"
             if [[ "${st}" == running* ]]; then
                 st_color="${GREEN}"
+            elif [[ "${st}" == "stopped" ]]; then
+                st_color="${YELLOW}"
             fi
 
             printf "%s%s%-15s ${st_color}%s${RESET}\n" "${c_sub_prefix}" "${t_prefix}" "${tool}" "[${st}]"

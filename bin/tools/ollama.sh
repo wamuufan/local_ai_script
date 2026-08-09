@@ -69,17 +69,29 @@ start_ollama() {
 
     check_and_clean_pid "${container}" "${pid_f}" "Ollama" "ollama" || return 0
 
-    if (echo > /dev/tcp/127.0.0.1/11434) 2>/dev/null; then
-        log_error "Port 11434 is already open/responding on host!"
-        log_info  "Ollama or another service appears to be running on http://localhost:11434."
-        return 1
-    fi
-
     local user_env="${home_dir}/.ollama/user.env"
     mkdir -p "${home_dir}/.ollama"
     extract_tool_config "${SCRIPT_DIR}/localai.conf" "ollama" > "${user_env}"
     if [[ -s "${user_env}" ]]; then
         log_info "Loaded configuration options from localai.conf [ollama]."
+    fi
+
+    local target_port="11434"
+    if [[ -f "${user_env}" ]]; then
+        local env_host
+        env_host="$(awk -F'=' '/^[ \t]*export[ \t]+OLLAMA_HOST=/ {gsub(/"/, "", $2); print $2}' "${user_env}" | tail -n 1)"
+        if [[ -n "${env_host}" ]]; then
+            local parsed_port="${env_host##*:}"
+            if [[ "${parsed_port}" =~ ^[0-9]+$ ]]; then
+                target_port="${parsed_port}"
+            fi
+        fi
+    fi
+
+    if (echo > "/dev/tcp/127.0.0.1/${target_port}") 2>/dev/null; then
+        log_error "Port ${target_port} is already open/responding on host!"
+        log_info  "Ollama or another service appears to be running on http://localhost:${target_port}."
+        return 1
     fi
 
     log_step "Starting Ollama in '${container}' (background)..."
@@ -115,8 +127,8 @@ start_ollama() {
     if [[ -f "${pid_f}" ]]; then
         local pid; pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
         if [[ -n "${pid}" ]]; then
-            wait_for_service "http://localhost:11434" 10 "Ollama" || true
-            log_success "Ollama started (PID ${pid}). API: http://localhost:11434"
+            wait_for_service "http://localhost:${target_port}" 10 "Ollama" || true
+            log_success "Ollama started (PID ${pid}). API: http://localhost:${target_port}"
             log_info    "Logs: ${log_f}"
             return 0
         fi

@@ -29,6 +29,7 @@
 - [Supported Tools](#supported-tools)
   - [Ollama](#ollama)
   - [ComfyUI](#comfyui)
+  - [Open WebUI](#open-webui)
 - [Adding New Tools](#adding-new-tools)
 - [License](#license)
 
@@ -108,10 +109,10 @@ localai.sh doctor
 localai.sh container new ollama-box
 
 # Install Ollama inside it
-localai.sh install ollama-box ollama
+localai.sh install ollama-box:ollama
 
 # Start the Ollama API server in the background
-localai.sh start ollama-box ollama
+localai.sh start ollama-box:ollama
 
 # Enter the container and pull a model
 localai.sh shell ollama-box
@@ -120,7 +121,7 @@ localai.sh shell ollama-box
 #   ollama run llama3.2
 
 # Stop the server when done
-localai.sh stop ollama-box ollama
+localai.sh stop ollama-box:ollama
 ```
 
 ```bash
@@ -128,10 +129,10 @@ localai.sh stop ollama-box ollama
 localai.sh container new image-gen
 
 # Install ComfyUI (clones repo, creates venv, installs PyTorch)
-localai.sh install image-gen comfyui
+localai.sh install image-gen:comfyui
 
 # Start the web UI on http://localhost:8188
-localai.sh start image-gen comfyui
+localai.sh start image-gen:comfyui
 ```
 
 ---
@@ -208,15 +209,15 @@ localai.sh container new <name>   # data in ~/.local/containers/<name>/ is reuse
 Installs a supported AI tool inside an existing container. All install functions are **idempotent** — re-running them is safe.
 
 ```bash
-localai.sh install <container> <tool>
+localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```
 
-**Supported tools:** `ollama`, `comfyui`
+**Supported tools:** `ollama`, `comfyui`, `openwebui`
 
 **Examples:**
 ```bash
-localai.sh install my-ai-lab ollama
-localai.sh install image-gen comfyui
+localai.sh install my-ai-lab:ollama
+localai.sh install image-gen:comfyui
 ```
 
 ---
@@ -226,13 +227,13 @@ localai.sh install image-gen comfyui
 Starts a tool's service in the **background** inside the container. Uses PID files to prevent double-starting.
 
 ```bash
-localai.sh start <container> <tool>
+localai.sh start <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```
 
 **Examples:**
 ```bash
-localai.sh start my-ai-lab ollama    # API available at http://localhost:11434
-localai.sh start image-gen comfyui   # Web UI available at http://localhost:8188
+localai.sh start my-ai-lab:ollama    # API available at http://localhost:11434
+localai.sh start image-gen:comfyui   # Web UI available at http://localhost:8188
 ```
 
 Logs are written to `log/<container>/<tool>.log`.
@@ -244,7 +245,7 @@ Logs are written to `log/<container>/<tool>.log`.
 Gracefully stops a running service using SIGTERM, then SIGKILL if it does not exit within the timeout.
 
 ```bash
-localai.sh stop <container> <tool>
+localai.sh stop <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```
 
 | Tool | Graceful timeout |
@@ -282,6 +283,10 @@ Type `exit` to return to the host shell.
 │   ├── .ollama/
 │   │   ├── models/                 # Downloaded Ollama models (persistent)
 │   │   └── ollama.env              # Runtime environment variables
+│   │
+│   ├── .openwebui/
+│   │   ├── conda/                  # Miniforge Python environment
+│   │   └── data/                   # User data and configurations
 │   │
 │   ├── comfyui/
 │   │   ├── .venv/                  # Python virtual environment
@@ -350,6 +355,25 @@ ollama list
 **Drop your `.safetensors` or `.ckpt` checkpoint files into:**
 ```
 ~/.local/containers/<name>/comfyui/models/checkpoints/
+```
+
+---
+
+### Open WebUI
+
+[Open WebUI](https://openwebui.com/) is an extensible, feature-rich, and user-friendly frontend for local LLMs (like Ollama).
+
+| Detail | Value |
+|---|---|
+| Source | Official PyPi `open-webui` |
+| Web UI port | `8080` |
+| Environment | Dedicated Miniforge Python 3.11 |
+| Data dir | `~/.local/containers/<name>/.openwebui/data/` |
+| Logs | `log/<container>/openwebui.log` |
+
+**To run Ollama and Open WebUI together:**
+```bash
+localai.sh start <container>:ollama,openwebui
 ```
 
 ---

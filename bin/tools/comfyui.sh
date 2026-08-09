@@ -132,16 +132,25 @@ start_comfyui() {
 
     check_and_clean_pid "${container}" "${pid_f}" "ComfyUI" "python" || return 0
 
-    if (echo > /dev/tcp/127.0.0.1/8188) 2>/dev/null; then
-        log_error "Port 8188 is already open/responding on host!"
-        log_info  "ComfyUI or another service appears to be running on http://localhost:8188."
-        return 1
-    fi
-
     local user_env="${home_dir}/.comfyui.user.env"
     extract_tool_config "${SCRIPT_DIR}/localai.conf" "comfyui" > "${user_env}"
     if [[ -s "${user_env}" ]]; then
         log_info "Loaded configuration options from localai.conf [comfyui]."
+    fi
+
+    local target_port="8188"
+    if [[ -f "${user_env}" ]]; then
+        local env_port
+        env_port="$(awk -F'=' '/^[ \t]*export[ \t]+COMFYUI_PORT=/ {gsub(/"/, "", $2); print $2}' "${user_env}" | tail -n 1)"
+        if [[ -n "${env_port}" && "${env_port}" =~ ^[0-9]+$ ]]; then
+            target_port="${env_port}"
+        fi
+    fi
+
+    if (echo > "/dev/tcp/127.0.0.1/${target_port}") 2>/dev/null; then
+        log_error "Port ${target_port} is already open/responding on host!"
+        log_info  "ComfyUI or another service appears to be running on http://localhost:${target_port}."
+        return 1
     fi
 
     log_step "Starting ComfyUI in '${container}' (background)..."
@@ -182,8 +191,8 @@ start_comfyui() {
     if [[ -f "${pid_f}" ]]; then
         local pid; pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
         if [[ -n "${pid}" ]]; then
-            wait_for_service "http://localhost:8188" 15 "ComfyUI" || true
-            log_success "ComfyUI started (PID ${pid}). Web UI: http://localhost:8188"
+            wait_for_service "http://localhost:${target_port}" 15 "ComfyUI" || true
+            log_success "ComfyUI started (PID ${pid}). Web UI: http://localhost:${target_port}"
             log_info    "Logs: ${log_f}"
             return 0
         fi

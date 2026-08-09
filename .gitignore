@@ -8,3 +8,6 @@ log/
 *.tmp
 *.swp
 .DS_Store
+
+# Secrets & Keys
+.webui_secret_key
