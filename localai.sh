@@ -79,95 +79,173 @@ _acquire_container_lock() {
     fi
 }
 
+_validate_target_args() {
+    local usage_msg="$1"
+    shift
+    [[ $# -eq 0 ]] && die "${usage_msg}"
+
+    for arg in "$@"; do
+        if [[ "${arg}" != *":"* ]]; then
+            die "Invalid target format: '${arg}'. Expected format: <container>:<tool1,tool2,...>"
+        fi
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
+        if [[ "${tools}" == *":"* ]]; then
+            die "Invalid target format: '${arg}'. Only one colon separator is allowed."
+        fi
+        [[ -z "${container}" || -z "${tools}" ]] && die "Invalid target format: '${arg}'. Both container and tool(s) must be specified."
+
+        assert_container_exists "${container}"
+
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            _validate_tool_name "${tool}"
+        done
+    done
+}
+
 cmd_install() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh install <container> <tool>"
+    _validate_target_args "Usage: localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
-    _acquire_container_lock "${container}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    "install_${tool}" "${container}"
+        _acquire_container_lock "${container}"
+
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            trap 'log_warn "Installation interrupted by user! Exiting..."; exit 130' INT TERM
+            "install_${tool}" "${container}"
+            trap - INT TERM
+        done
+    done
 }
 
 cmd_uninstall() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh uninstall <container> <tool>"
+    _validate_target_args "Usage: localai.sh uninstall <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
-    _acquire_container_lock "${container}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    "uninstall_${tool}" "${container}"
+        _acquire_container_lock "${container}"
+
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            "uninstall_${tool}" "${container}"
+        done
+    done
 }
 
 cmd_start() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh start <container> <tool>"
+    _validate_target_args "Usage: localai.sh start <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    "start_${tool}" "${container}"
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            "start_${tool}" "${container}"
+        done
+    done
 }
 
 cmd_stop() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh stop <container> <tool>"
+    _validate_target_args "Usage: localai.sh stop <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    "stop_${tool}" "${container}"
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            "stop_${tool}" "${container}"
+        done
+    done
 }
 
 cmd_status() {
-    local container="${1:-}" tool="${2:-}"
-    if [[ -z "${container}" && -z "${tool}" ]]; then
+    if [[ $# -eq 0 ]]; then
         status_all_containers_tree
         return 0
     fi
 
-    if [[ -z "${container}" || -z "${tool}" ]]; then
-        die "Usage: localai.sh status [<container> <tool>]"
-    fi
+    _validate_target_args "Usage: localai.sh status [<container>:<tool1,tool2,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    status_service_in_container "${container}" "${tool}"
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            status_service_in_container "${container}" "${tool}"
+        done
+    done
 }
 
 cmd_logs() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh logs <container> <tool>"
+    _validate_target_args "Usage: localai.sh logs <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
+    local -a log_files=()
 
-    local log_f="${LOG_DIR}/${container}/${tool}.log"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    if [[ ! -f "${log_f}" ]]; then
-        log_error "No log file found for ${tool} in '${container}' (${log_f})."
-        log_info  "Please start the service first using: localai.sh start ${container} ${tool}"
-        exit 1
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+
+            local log_f="${LOG_DIR}/${container}/${tool}.log"
+            if [[ ! -f "${log_f}" ]]; then
+                log_error "No log file found for ${tool} in '${container}' (${log_f})."
+                log_info  "Please start the service first using: localai.sh start ${container}:${tool}"
+                exit 1
+            fi
+            log_files+=("${log_f}")
+        done
+    done
+
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        die "No valid log files specified or found."
     fi
 
-    log_info "Following runtime logs for ${tool} in '${container}'... (Ctrl+C to stop)"
-    tail -f "${log_f}"
+    log_info "Following runtime logs... (showing last 100 lines, Press Ctrl+C to stop)"
+    tail -n 100 -f "${log_files[@]}"
 }
 
 cmd_restart() {
-    local container="${1:-}" tool="${2:-}"
-    [[ -z "${container}" || -z "${tool}" ]] && die "Usage: localai.sh restart <container> <tool>"
+    _validate_target_args "Usage: localai.sh restart <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
-    assert_container_exists "${container}"
-    _validate_tool_name "${tool}"
+    for arg in "$@"; do
+        local container="${arg%%:*}"
+        local tools="${arg#*:}"
 
-    log_info "Restarting ${tool} in '${container}'..."
-    cmd_stop "${container}" "${tool}"
-    sleep 1
-    cmd_start "${container}" "${tool}"
+        IFS=',' read -ra tool_array <<< "${tools}"
+        for tool in "${tool_array[@]}"; do
+            tool="${tool// /}"
+            [[ -z "${tool}" ]] && continue
+            log_info "Restarting ${tool} in '${container}'..."
+            "stop_${tool}" "${container}"
+            sleep 1
+            "start_${tool}" "${container}"
+        done
+    done
 }
 
 cmd_shell() {
@@ -204,27 +282,27 @@ ${BOLD}CONTAINER MANAGEMENT${RESET}
       Open an interactive shell (bash) inside the specified container.
 
 ${BOLD}SERVICE & TOOL MANAGEMENT${RESET} (Supported tools: ${tools})
-  ${CYAN}install${RESET}         <container> <tool>
-      Install a tool inside a container (idempotent / safe to re-run).
+  ${CYAN}install${RESET}         <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Install tool(s) inside container(s) (idempotent / safe to re-run).
 
-  ${CYAN}uninstall${RESET}       <container> <tool>
-      Uninstall a tool and remove its application files from the specified container.
+  ${CYAN}uninstall${RESET}       <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Uninstall tool(s) and remove application files from container(s).
 
-  ${CYAN}start${RESET}           <container> <tool>
-      Start a tool in the background inside the container (PID double-start protected).
+  ${CYAN}start${RESET}           <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Start tool(s) in background inside container(s) (PID double-start protected).
 
-  ${CYAN}stop${RESET}            <container> <tool>
-      Gracefully stop a running tool service (SIGTERM → SIGKILL after timeout).
+  ${CYAN}stop${RESET}            <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Gracefully stop running tool service(s) (SIGTERM → SIGKILL after timeout).
 
-  ${CYAN}restart${RESET}         <container> <tool>
-      Restart a tool service inside the container (stop then start).
+  ${CYAN}restart${RESET}         <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Restart tool service(s) inside container(s) (stop then start).
 
-  ${CYAN}status${RESET}          [<container> <tool>]
+  ${CYAN}status${RESET}          [<container>:<tool1,tool2,...> ...]
       No args : Display status tree of all managed containers and installed tools.
-      With args: Check single service status for specified container and tool.
+      With args: Check service status for specified container(s) and tool(s).
 
-  ${CYAN}logs${RESET}            <container> <tool>
-      Tail live runtime logs for a specific tool inside a container.
+  ${CYAN}logs${RESET}            <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+      Tail live runtime logs for tool(s) inside container(s).
 
 ${BOLD}SYSTEM COMMANDS${RESET}
   ${CYAN}doctor${RESET}
