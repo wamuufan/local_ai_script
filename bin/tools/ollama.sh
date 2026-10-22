@@ -10,20 +10,16 @@ install_ollama() {
     local home_dir="${BASE_DIR}/${container}"
 
     log_header "Installing Ollama → ${container}"
+    steps_begin 4
 
-    log_step "Updating package lists..."
-    distrobox enter "${container}" -- bash -c "
-        set -e
-        export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq curl ca-certificates zstd lz4 pigz tar gzip unzip xz-utils procps pciutils jq libzstd-dev
-    "
+    log_step "Installing system dependencies..."
+    ensure_base_packages "${container}" curl ca-certificates zstd lz4 pigz tar gzip unzip xz-utils procps pciutils jq libzstd-dev libtcmalloc-minimal4
 
-    log_step "Downloading and running official Ollama installer..."
+    log_step "Downloading and running official Ollama installer (~1.5 GB, progress bar below)..."
     distrobox enter "${container}" -- bash -c "
         set -e
         if command -v ollama &>/dev/null; then
-            echo 'Ollama is already installed, skipping.'
+            echo '     Ollama is already installed, skipping.'
             ollama --version
             exit 0
         fi
@@ -44,36 +40,100 @@ EOF
     if ! distrobox enter "${container}" -- bash -c "command -v ollama &>/dev/null && ollama --version"; then
         die "Ollama verification failed. Installation may be incomplete."
     fi
+    steps_end
 
     log_success "Ollama installed successfully in '${container}'."
     log_info    "Data directory : ${home_dir}/.ollama"
     log_warn    "Note: Systemd is disabled inside Distrobox containers."
-    log_info    "Start Ollama using: localai.sh start ${container} ollama"
-    log_info    "Pull a model   : localai.sh shell ${container}  →  ollama pull llama3.2"
+    log_info    "Start Ollama using: localai.sh start ${container}:ollama"
+    log_info    "Pull a model   : localai.sh model pull ${container}:ollama llama3.2"
+}
+
+is_installed_ollama() { [[ -d "${BASE_DIR}/$1/.ollama" ]]; }
+
+pull_model_ollama() {
+    local container="$1"
+    local model="${2:-}"
+
+    if [[ -z "${model}" ]]; then
+        die "Model name is required! (e.g., llama3.2, mistral, gemma2)"
+    fi
+
+    if ! is_installed_ollama "${container}"; then
+        die "Ollama is not installed in '${container}'. Install it first: localai.sh install ${container}:ollama"
+    fi
+
+    local home_dir="${BASE_DIR}/${container}"
+    if [[ "$(get_tool_status_in_container "${container}" "ollama")" == "stopped" ]]; then
+        log_info "Ollama is stopped. Starting Ollama first..."
+        start_ollama "${container}"
+    fi
+
+    log_header "Pulling Ollama Model: ${model} → ${container}"
+    distrobox enter "${container}" -- bash -c 'source "$1/.ollama/ollama.env" 2>/dev/null || true; source "$1/.ollama/user.env" 2>/dev/null || true; ollama pull "$2"' _ "${home_dir}" "${model}"
+}
+
+list_models_ollama() {
+    local container="$1"
+
+    if ! is_installed_ollama "${container}"; then
+        die "Ollama is not installed in '${container}'. Install it first: localai.sh install ${container}:ollama"
+    fi
+
+    local home_dir="${BASE_DIR}/${container}"
+    if [[ "$(get_tool_status_in_container "${container}" "ollama")" == "stopped" ]]; then
+        log_info "Ollama is stopped. Starting Ollama first..."
+        start_ollama "${container}"
+    fi
+
+    log_header "Ollama Models in '${container}'"
+    distrobox enter "${container}" -- bash -c 'source "$1/.ollama/ollama.env" 2>/dev/null || true; source "$1/.ollama/user.env" 2>/dev/null || true; ollama list' _ "${home_dir}"
+}
+
+update_ollama() {
+    local container="$1"
+    log_header "Updating Ollama → ${container}"
+    steps_begin 2
+    log_step "Downloading and installing latest Ollama release (progress bar below)..."
+    distrobox enter "${container}" -- bash -c "
+        set -e
+        old=\$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+        echo \"     Current version: \${old:-unknown}\"
+        curl -fsSL https://ollama.com/install.sh | sh
+        new=\$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+        if [[ \"\${old}\" == \"\${new}\" ]]; then
+            echo \"     Ollama is already up to date (\${new}).\"
+        else
+            echo \"     Ollama upgraded: \${old:-unknown} → \${new:-unknown}\"
+        fi
+    "
+    log_step "Checking if a restart is needed..."
+    if [[ "$(get_tool_status_in_container "${container}" ollama)" == running* ]]; then
+        log_warn "Ollama is running with the old version. Apply with: localai.sh restart ${container}:ollama"
+    else
+        log_info "Ollama is not running; new version will be used on next start."
+    fi
+    steps_end
+    log_success "Ollama updated in '${container}'."
 }
 
 start_ollama() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
-    local pid_f;  pid_f="$(pid_file "${container}" "ollama")"
+    local pid_f; pid_f="$(pid_file "${container}" "ollama")"
     local log_f="${LOG_DIR}/${container}/ollama.log"
-
-    mkdir -p "${home_dir}/.run" "${LOG_DIR}/${container}"
-
-    if [[ -f "${log_f}" ]]; then
-        local size; size="$(stat -c%s "${log_f}" 2>/dev/null || echo 0)"
-        if (( size >= 10485760 )); then
-            mv "${log_f}" "${log_f}.old" 2>/dev/null || true
-        fi
-    fi
-
-    check_and_clean_pid "${container}" "${pid_f}" "Ollama" "ollama" || return 0
 
     local user_env="${home_dir}/.ollama/user.env"
     mkdir -p "${home_dir}/.ollama"
-    extract_tool_config "${SCRIPT_DIR}/localai.conf" "ollama" > "${user_env}"
-    if [[ -s "${user_env}" ]]; then
-        log_info "Loaded configuration options from localai.conf [ollama]."
+    local active_conf
+    if active_conf="$(resolve_config_file "${container}")"; then
+        extract_tool_config "${active_conf}" "ollama" > "${user_env}"
+        if [[ -s "${user_env}" ]]; then
+            log_info "Loaded configuration options from $(basename "${active_conf}") [ollama]."
+        fi
+    else
+        > "${user_env}"
+        log_debug "No active configuration file found (.disabled ignored). Using defaults for ollama."
     fi
 
     local target_port="11434"
@@ -88,55 +148,15 @@ start_ollama() {
         fi
     fi
 
-    if (echo > "/dev/tcp/127.0.0.1/${target_port}") 2>/dev/null; then
-        log_error "Port ${target_port} is already open/responding on host!"
-        log_info  "Ollama or another service appears to be running on http://localhost:${target_port}."
-        return 1
-    fi
-
-    log_step "Starting Ollama in '${container}' (background)..."
-    if ! distrobox enter "${container}" -- bash -c "
+    local start_script="
         set -e
         source '${home_dir}/.ollama/ollama.env' 2>/dev/null || true
         source '${home_dir}/.ollama/user.env' 2>/dev/null || true
         nohup ollama serve >> '${log_f}' 2>&1 &
-        pid=\$!
-        success=false
-        for i in \$(seq 1 5); do
-            if kill -0 \"\$pid\" 2>/dev/null; then
-                sleep 1
-                if kill -0 \"\$pid\" 2>/dev/null; then
-                    echo \"\$pid\" > '${pid_f}'
-                    echo \"Ollama started with PID \$pid\"
-                    success=true
-                    break
-                fi
-            fi
-            sleep 1
-        done
-        if [[ \"\$success\" != \"true\" ]]; then
-            echo \"Ollama failed to start. Check logs: ${log_f}\" >&2
-            exit 1
-        fi
-    "; then
-        log_error "Ollama failed to start or stopped immediately. Check logs: ${log_f}"
-        rm -f "${pid_f}"
-        return 1
-    fi
+        echo \"\$!\" > '${pid_f}'
+    "
 
-    if [[ -f "${pid_f}" ]]; then
-        local pid; pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
-        if [[ -n "${pid}" ]]; then
-            wait_for_service "http://localhost:${target_port}" 10 "Ollama" || true
-            log_success "Ollama started (PID ${pid}). API: http://localhost:${target_port}"
-            log_info    "Logs: ${log_f}"
-            return 0
-        fi
-    fi
-
-    log_error "Ollama failed to start or stopped immediately. Check logs: ${log_f}"
-    rm -f "${pid_f}"
-    return 1
+    start_service_in_container "${container}" "ollama" "${target_port}" "ollama" "${start_script}" 10 "http://localhost:${target_port}"
 }
 
 stop_ollama() {
@@ -148,13 +168,16 @@ uninstall_ollama() {
     local home_dir="${BASE_DIR}/${container}"
 
     log_header "Uninstalling Ollama ← ${container}"
+    steps_begin 3
+    log_step "Stopping Ollama if running..."
     stop_ollama "${container}" || true
 
     log_step "Removing Ollama binary and configuration..."
     distrobox enter "${container}" -- bash -c "sudo -n rm -f /usr/local/bin/ollama 2>/dev/null || rm -f /usr/local/bin/ollama 2>/dev/null" || true
 
-    log_step "Removing user directory and environment files..."
-    rm -rf "${home_dir}/.ollama"
+    log_step "Removing user directory and environment files (including downloaded models)..."
+    run_with_spinner "Deleting ${home_dir}/.ollama" rm -rf "${home_dir}/.ollama"
+    steps_end
 
     log_success "Ollama uninstalled from '${container}'."
 }

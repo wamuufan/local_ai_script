@@ -16,21 +16,36 @@
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Command Reference](#command-reference)
+  - [Global Options](#global-options)
   - [doctor](#doctor)
   - [container new](#container-new)
   - [container list](#container-list)
   - [container rm](#container-rm)
   - [install](#install)
+  - [uninstall](#uninstall)
+  - [update](#update)
   - [start](#start)
   - [stop](#stop)
+  - [restart](#restart)
+  - [status](#status)
+  - [logs](#logs)
+  - [open](#open)
   - [shell](#shell)
+  - [model](#model)
+  - [transcribe](#transcribe)
+  - [memory](#memory)
+- [Configuration & Memory Profiles](#configuration--memory-profiles)
 - [File System Layout](#file-system-layout)
 - [Data Persistence](#data-persistence)
 - [Supported Tools](#supported-tools)
   - [Ollama](#ollama)
   - [ComfyUI](#comfyui)
   - [Open WebUI](#open-webui)
+  - [IOPaint](#iopaint)
+  - [Whisper (Speaches / faster-whisper)](#whisper-speaches--faster-whisper)
+  - [Native Viewer (WebKitGTK)](#native-viewer-webkitgtk)
 - [Adding New Tools](#adding-new-tools)
+- [Security Notes](#security-notes)
 - [License](#license)
 
 ---
@@ -139,6 +154,20 @@ localai.sh start image-gen:comfyui
 
 ## Command Reference
 
+### Global Options
+
+The following flags can precede any command:
+
+- `-v`, `--verbose` : Enable detailed debug output and trace execution.
+- `-c <file>`, `--config <file>` : Specify a custom configuration file path (defaults to auto-detecting `localai.conf` or `<container>.conf`).
+
+```bash
+localai.sh -v status
+localai.sh -c /path/to/custom.conf start my-ai-lab:all
+```
+
+---
+
 ### `doctor`
 
 Checks all required and optional host dependencies and reports their status.
@@ -212,28 +241,75 @@ Installs a supported AI tool inside an existing container. All install functions
 localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```
 
-**Supported tools:** `ollama`, `comfyui`, `openwebui`
+> ℹ️ Note: The `all` target is not supported for `install`. Explicit tool names must be specified.
+
+**Supported tools:** `ollama`, `comfyui`, `openwebui`, `iopaint`, `whisper`, `viewer`
 
 **Examples:**
 ```bash
 localai.sh install my-ai-lab:ollama
 localai.sh install image-gen:comfyui
+localai.sh install speech:whisper
+```
+
+---
+
+### `uninstall`
+
+Uninstalls installed tool(s) and their virtual/conda environments from a container while keeping persistent models. Supports the `<container>:all` shortcut to uninstall all installed tools (including `viewer`).
+
+```bash
+localai.sh uninstall <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+```
+
+**Examples:**
+```bash
+localai.sh uninstall my-ai-lab:openwebui
+localai.sh uninstall speech:whisper
+localai.sh uninstall my-ai-lab:all          # Uninstalls all tools installed in the container
+```
+
+---
+
+### `update`
+
+Updates installed tool(s) to their latest release or commit inside the container. Supports the `<container>:all` shortcut to update all installed services.
+
+```bash
+localai.sh update <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+```
+
+**What it does per tool:**
+- **Ollama**: Re-executes the official installer to update the binary.
+- **ComfyUI**: Performs `git pull --ff-only` and upgrades requirements via `pip install -r requirements.txt --upgrade`.
+- **Open WebUI**: Runs `pip install --upgrade open-webui` inside its conda environment.
+- **IOPaint**: Runs `pip install --upgrade iopaint` inside its conda environment.
+- **Whisper**: Upgrades pip tooling, dependencies, and `speaches`.
+
+**Examples:**
+```bash
+localai.sh update my-ai-lab:ollama
+localai.sh update image-gen:comfyui
+localai.sh update my-ai-lab:ollama,openwebui
+localai.sh update my-ai-lab:all
 ```
 
 ---
 
 ### `start`
 
-Starts a tool's service in the **background** inside the container. Uses PID files to prevent double-starting.
+Starts a tool's service in the **background** inside the container. Uses PID files to prevent double-starting. Supports the `<container>:all` shortcut to start all installed tools.
 
 ```bash
-localai.sh start <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+localai.sh start <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
 ```
 
 **Examples:**
 ```bash
 localai.sh start my-ai-lab:ollama    # API available at http://localhost:11434
 localai.sh start image-gen:comfyui   # Web UI available at http://localhost:8188
+localai.sh start speech:whisper      # STT server available at http://localhost:8083
+localai.sh start my-ai-lab:all       # Starts all installed tools in container
 ```
 
 Logs are written to `log/<container>/<tool>.log`.
@@ -242,16 +318,109 @@ Logs are written to `log/<container>/<tool>.log`.
 
 ### `stop`
 
-Gracefully stops a running service using SIGTERM, then SIGKILL if it does not exit within the timeout.
+Gracefully stops running service(s) using SIGTERM, then SIGKILL if it does not exit within the timeout. Supports the `<container>:all` shortcut to stop all installed tools.
 
 ```bash
-localai.sh stop <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+localai.sh stop <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
 ```
 
 | Tool | Graceful timeout |
 |---|---|
 | `ollama` | 10 seconds |
 | `comfyui` | 15 seconds |
+| `openwebui` | 15 seconds |
+| `iopaint` | 15 seconds |
+| `whisper` | 15 seconds |
+
+**Examples:**
+```bash
+localai.sh stop my-ai-lab:ollama
+localai.sh stop my-ai-lab:all
+```
+
+---
+
+### `restart`
+
+Restarts service(s) by executing a graceful stop followed by a start. Supports the `<container>:all` shortcut.
+
+```bash
+localai.sh restart <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+```
+
+**Examples:**
+```bash
+localai.sh restart my-ai-lab:ollama
+localai.sh restart my-ai-lab:all
+```
+
+---
+
+### `status`
+
+Displays the runtime status (running PID, listening ports, health, memory usage) of services. If invoked without arguments, prints a tree of all containers and tools. Supports `<container>:all`.
+
+```bash
+# Tree view of all containers and services:
+localai.sh status
+
+# Target specific container tools or all:
+localai.sh status <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+```
+
+**Examples:**
+```bash
+localai.sh status
+localai.sh status my-ai-lab:ollama
+localai.sh status my-ai-lab:all
+```
+
+---
+
+### `logs`
+
+Follows or views stdout/stderr runtime logs for services. Supports the `<container>:all` shortcut to stream logs from all installed tools in the container simultaneously.
+
+```bash
+localai.sh logs [-n <lines>] [--no-follow] <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+```
+
+**Flags:**
+- `-n <lines>`, `--lines <lines>`: Number of lines to show (default: `100`).
+- `--no-follow`, `--no-tail`: View the last lines without streaming live updates (`tail -f`).
+
+**Examples:**
+```bash
+localai.sh logs my-ai-lab:ollama
+localai.sh logs -n 50 --no-follow image-gen:comfyui
+localai.sh logs speech:whisper
+localai.sh logs my-ai-lab:all
+```
+
+---
+
+### `open`
+
+Opens a tool's user interface inside an **ultra-lightweight native WebKitGTK window** (~45 MB RAM) directly from the container.
+
+- **No address bar**, navigation buttons, or browser bloat.
+- **No shortcut hijacking**: `Ctrl+S` passes directly to the web app (e.g. saving ComfyUI workflows without triggering browser "Save Page As" dialogs).
+- **Auto-starts service**: If the tool is installed but stopped, `localai.sh open` starts it first.
+- **Auto-installs viewer**: If the viewer component is not yet present in the container, it installs it automatically.
+
+```bash
+localai.sh open <container>:<tool>
+# or custom port / URL:
+localai.sh open <container> <port|url>
+```
+
+**Examples:**
+```bash
+localai.sh open image-gen:comfyui    # Opens ComfyUI at http://localhost:8188
+localai.sh open my-ai-lab:openwebui  # Opens Open WebUI at http://localhost:8080
+localai.sh open image-gen:iopaint    # Opens IOPaint at http://localhost:8082
+localai.sh open image-gen 8188       # Opens custom port on localhost
+```
 
 ---
 
@@ -267,22 +436,94 @@ Type `exit` to return to the host shell.
 
 ---
 
+### `model`
+
+Manages models for supported tools (such as Ollama and Whisper).
+
+- **Pulling a model:**
+  ```bash
+  localai.sh model pull <container>:<tool> <model_name>
+  ```
+- **Listing models:**
+  ```bash
+  localai.sh model list <container>:<tool>
+  ```
+
+**Examples:**
+```bash
+# Pull and list models with Ollama:
+localai.sh model pull my-ai-lab:ollama llama3.2
+localai.sh model list my-ai-lab:ollama
+
+# Download a model for Whisper (from HuggingFace Hub) and set as default:
+localai.sh model pull speech:whisper Systran/faster-whisper-large-v3
+localai.sh model pull speech:whisper Systran/faster-whisper-small
+
+# List downloaded Whisper models in a container:
+localai.sh model list speech:whisper
+```
+
+---
+
+### `transcribe`
+
+Transcribes audio files into text using the Whisper (Speaches) service inside a container. If the Whisper service is currently stopped, it starts it temporarily for the transcription request.
+
+```bash
+localai.sh transcribe <container>:whisper <audio_file> [--lang <lang>] [--format <format>]
+```
+
+**Options:**
+- `--lang <lang>` (or `--language <lang>`): Spoken language code (e.g., `en`, `tr`, `de`, `fr`). Defaults to auto-detection.
+- `--format <format>`: Output response format (e.g., `json`, `text`, `srt`, `vtt`). Default: `json`. The transcription output is written to `<audio_file>.<format>`.
+
+**Examples:**
+```bash
+# Basic transcription (saves output to speech.wav.json):
+localai.sh transcribe speech:whisper /path/to/speech.wav
+
+# Specify Turkish language and text output (saves to interview.mp3.text):
+localai.sh transcribe speech:whisper ~/interview.mp3 --lang tr --format text
+
+# Generate SRT subtitles:
+localai.sh transcribe speech:whisper podcast.m4a --format srt
+```
+
+---
+
+### `memory`
+
+Monitors and aggressively manages RAM, Swap, NVIDIA GPU VRAM, and AI process allocations.
+
+```bash
+# Check host & container memory usage and active profile
+localai.sh memory status [<container>]
+
+# Reclaim VRAM, evict idle models, purge shared memory, and sync caches
+localai.sh memory clean [<container>] [--all|--vram|--ram|--cache]
+```
+
+**Actions performed by `memory clean`:**
+- **VRAM Eviction**: Dispatches API eviction calls (`keep_alive: 0`) to running Ollama instances and triggers model unload in ComfyUI.
+- **Shared Memory Cleanup**: Removes stale `/dev/shm` IPC handles (`torch_*`, `cuda_*`, `sem.*`).
+- **Filesystem & Page Cache Sync**: Executes system `sync` and flushes cache if permitted.
+
+---
+
 ## File System Layout
 
 ```
 ~/.local/containers/
-├── .logs/                          # Host-side log directory
-│
 ├── <container-name>/               # Isolated home directory (persists after container removal)
-│   ├── .run/
+│   ├── .run/                       # Runtime process PID tracking
 │   │   ├── ollama.pid              # PID file for the Ollama service
 │   │   ├── comfyui.pid             # PID file for the ComfyUI service
-│   │   ├── ollama.log              # Ollama runtime logs
-│   │   └── comfyui.log             # ComfyUI runtime logs
+│   │   ├── openwebui.pid           # PID file for Open WebUI
+│   │   ├── iopaint.pid             # PID file for IOPaint
+│   │   └── whisper.pid             # PID file for Whisper (Speaches)
 │   │
 │   ├── .ollama/
-│   │   ├── models/                 # Downloaded Ollama models (persistent)
-│   │   └── ollama.env              # Runtime environment variables
+│   │   └── models/                 # Downloaded Ollama models (persistent)
 │   │
 │   ├── .openwebui/
 │   │   ├── conda/                  # Miniforge Python environment
@@ -299,7 +540,27 @@ Type `exit` to return to the host shell.
 │   │   ├── output/                 # Generated images
 │   │   ├── input/                  # Input images
 │   │   └── custom_nodes/           # ComfyUI extensions
-│   └── .comfyui.env                # Runtime environment variables
+│   │
+│   ├── iopaint/
+│   │   ├── conda/                  # Miniforge Python environment
+│   │   └── models/                 # Downloaded inpainting models
+│   │
+│   ├── whisper/
+│   │   ├── conda/                  # Miniforge Python environment
+│   │   └── models/                 # Downloaded HuggingFace STT models
+│   │
+│   ├── .localai.env                # Base container environment configuration
+│   └── .<tool>.user.env            # User/config overrides per tool
+│
+<project-root>/
+└── log/
+    ├── <container>/                # Per-container service logs
+    │   ├── ollama.log
+    │   ├── comfyui.log
+    │   ├── openwebui.log
+    │   ├── iopaint.log
+    │   └── whisper.log
+    └── localai_YYYY-MM-DD.jsonl    # Host audit & structured execution logs
 ```
 
 ---
@@ -378,52 +639,198 @@ localai.sh start <container>:ollama,openwebui
 
 ---
 
-## Adding New Tools
+### IOPaint
 
-The tool system is intentionally modular. To add support for a new tool:
+[IOPaint](https://github.com/Sanster/IOPaint) is a free and open-source image inpainting & outpainting tool powered by SOTA AI models (such as LaMa, MAT, etc.).
 
-**Step 1 — Implement three functions:**
+| Detail | Value |
+|---|---|
+| Source | Official PyPI `iopaint` |
+| Web UI port | `8082` |
+| Environment | Dedicated Miniforge Python 3.10 |
+| PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
+| Models dir | `~/.local/containers/<name>/iopaint/models/` |
+| Logs | `log/<container>/iopaint.log` |
+
+**To install and start IOPaint:**
+```bash
+localai.sh install <container>:iopaint
+localai.sh start <container>:iopaint
+# Open http://localhost:8082 in your browser
+```
+
+---
+
+### Whisper (Speaches / faster-whisper)
+
+[Speaches](https://github.com/speaches-ai/speaches) is an OpenAI-compatible Speech-to-Text (STT) server powered by `faster-whisper` and PyTorch.
+
+| Detail | Value |
+|---|---|
+| Source | PyPI `speaches` (`faster-whisper`) |
+| API port | `8083` |
+| Environment | Dedicated Miniforge Python 3.12 |
+| PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
+| App & Models dir | `~/.local/containers/<name>/whisper` (`~/.local/containers/<name>/whisper/models/`) |
+| Logs | `log/<container>/whisper.log` |
+
+**To install and run Whisper:**
+```bash
+# 1. Install Whisper in container:
+localai.sh install speech:whisper
+
+# 2. Download a model from Hugging Face:
+localai.sh model pull speech:whisper Systran/faster-whisper-large-v3
+
+# 3. List downloaded models:
+localai.sh model list speech:whisper
+
+# 4. Start the STT server:
+localai.sh start speech:whisper
+
+# 5. Transcribe an audio file directly:
+localai.sh transcribe speech:whisper sample.wav --lang en --format json
+```
+
+---
+
+### Native Viewer (WebKitGTK)
+
+An ultra-lightweight, dedicated native app window engine based on Linux's official WebKitGTK stack (`gir1.2-webkit2-4.1` / `python3-gi`). Designed specifically to view local AI user interfaces without using the host desktop browser.
+
+| Detail | Value |
+|---|---|
+| Engine | WebKitGTK (Ubuntu official system package) |
+| Memory (RAM) | **~45 - 65 MB** |
+| Address bar / Toolbars | **None** (Clean, distraction-free app window) |
+| Shortcuts | `Ctrl+S` preserved for AI app workflows; `F5`/`Ctrl+R` for reload; `F11` for fullscreen |
+| Launcher path | `~/.local/containers/<name>/.local/bin/localai-viewer` |
+
+**To install and run:**
+```bash
+# Explicit installation:
+localai.sh install <container>:viewer
+
+# Or simply open any tool (viewer installs automatically if missing):
+localai.sh open image-gen:comfyui
+localai.sh open my-ai-lab:openwebui
+```
+
+---
+
+## Configuration & Memory Strategies
+
+`localai.sh` provides two disabled configuration templates out of the box:
+- `localai.dynamic.conf.disabled`: Dynamic strategy-based configuration (`MEMORY_STRATEGY=aggressive_release | balanced_caching | high_performance_pinned`). Automatically tunes VRAM unloading, smart memory, PyTorch CUDA fragmentation guards, and post-stop reclamation.
+- `localai.static.conf.disabled`: Direct static configuration with all aggressive memory-saving parameters pre-configured and explained line-by-line (`keep_alive=0`, `num_parallel=1`, `--disable-smart-memory`, `PYTORCH_CUDA_ALLOC_CONF`, TCMalloc).
+
+> ℹ️ **NOTE**: Files ending with `.disabled` are strictly ignored by the script.
+
+### Memory Strategies Explained
+
+| Strategy | VRAM & RAM Management Behavior | Recommended For |
+| :--- | :--- | :--- |
+| `aggressive_release` | Immediate VRAM model offloading (`keep_alive=0`, `--disable-smart-memory`), single concurrent context slot, PyTorch allocator anti-fragmentation guards, TCMalloc preloaded. | GPUs ≤ 12GB VRAM or systems ≤ 32GB RAM |
+| `balanced_caching` | 5-minute model warm retention in Ollama, ComfyUI smart memory caching active for fast consecutive generations. | Systems with 16GB VRAM & 32GB–64GB RAM |
+| `high_performance_pinned` | Models permanently pinned in VRAM (`keep_alive=-1`), up to 4 parallel contexts, `--highvram` enabled in ComfyUI. | Dedicated AI workstations (24GB+ VRAM & 64GB+ RAM) |
+
+### Activating a Configuration
+
+To enable a configuration mode, remove the `.disabled` suffix (or copy to `localai.conf`):
 
 ```bash
+# Option 1: Activate dynamic memory strategy configuration (Recommended)
+cp localai.dynamic.conf.disabled localai.conf
+
+# Option 2: Activate direct static configuration
+cp localai.static.conf.disabled localai.conf
+```
+
+---
+
+## Adding New Tools
+
+The tool system is completely modular and self-discovering. To add a new tool:
+
+Simply create a new script file in `bin/tools/<mytool>.sh`. All `.sh` files placed in `bin/tools/` are sourced automatically by `localai.sh`, and tool names are dynamically discovered by `get_supported_tools()`. **There is no need to manually edit or maintain a `readonly SUPPORTED_TOOLS=(...)` array.**
+
+Inside `bin/tools/<mytool>.sh`, implement the following standard functions:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 1. Check if tool is installed
+is_installed_mytool() {
+    local container="$1"
+    local home_dir="${BASE_DIR}/${container}"
+    [[ -d "${home_dir}/mytool" ]]
+}
+
+# 2. Install tool (idempotent)
 install_mytool() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
 
     log_header "Installing mytool → ${container}"
-    # ... idempotent installation logic ...
+    ensure_base_packages "${container}" git curl procps
+
+    # Installation logic inside container...
     log_success "mytool installed."
 }
 
+# 3. Start service
 start_mytool() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
-    local pid_f;  pid_f="$(pid_file "${container}" "mytool")"
+    local pid_f; pid_f="$(pid_file "${container}" "mytool")"
     local log_f="${LOG_DIR}/${container}/mytool.log"
 
-    mkdir -p "${home_dir}/.run"
-
-    # Double-start guard & stale PID check inside container
-    check_and_clean_pid "${container}" "${pid_f}" "mytool" || return 0
-
-    distrobox enter "${container}" -- bash -c "
-        nohup mytool-server > '${log_f}' 2>&1 &
-        echo \$! > '${pid_f}'
+    local port="8085"
+    local start_script="
+        set -e
+        nohup mytool-server --port ${port} >> '${log_f}' 2>&1 &
+        echo \"\$!\" > '${pid_f}'
     "
-    log_success "mytool started."
+
+    # Uses the unified start_service_in_container helper with PID checks & port polling:
+    start_service_in_container "${container}" "mytool" "${port}" "mytool-server" "${start_script}" 30 "http://localhost:${port}"
 }
 
+# 4. Stop service
 stop_mytool() {
-    stop_service_in_container "$1" "mytool" 5
+    stop_service_in_container "$1" "mytool" 15
+}
+
+# 5. Update tool (optional)
+update_mytool() {
+    local container="$1"
+    log_header "Updating mytool → ${container}"
+    # Update logic...
+    log_success "mytool updated."
+}
+
+# 6. Uninstall tool
+uninstall_mytool() {
+    local container="$1"
+    local home_dir="${BASE_DIR}/${container}"
+
+    log_header "Uninstalling mytool ← ${container}"
+    stop_mytool "${container}" || true
+    rm -rf "${home_dir}/mytool"
+    log_success "mytool uninstalled from '${container}'."
 }
 ```
 
-**Step 2 — Register the tool name:**
+Argument routing, CLI validation, locking, and help integration work out of the box once the file is placed in `bin/tools/`.
 
-```bash
-readonly SUPPORTED_TOOLS=("ollama" "comfyui" "mytool")
-```
+---
 
-That's it. Argument routing, validation, and error messages are handled automatically.
+## Security Notes
+
+- **Secrets and Authentication Tokens**: Sensitive secrets (such as `.webui_secret_key` or API keys) should never be stored in the root git repository. Open WebUI creates and manages its authentication secret keys directly inside each container's home directory (`~/.local/containers/<name>/.openwebui/`).
+- **Network Isolation**: By default, services listen on `0.0.0.0` or `127.0.0.1` as configured in `localai.conf`. If deploying on untrusted or shared local networks, ensure firewalls are configured or set host bindings to `127.0.0.1`.
+- **Locking & Concurrency**: Directory-based atomic locks prevent simultaneous overlapping install/update tasks across the same container instance.
 
 ---
 

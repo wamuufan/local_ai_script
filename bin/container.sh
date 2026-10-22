@@ -35,6 +35,8 @@ cmd_container_new() {
         return 0
     fi
 
+    steps_begin 4
+
     log_step "Creating isolated home directory: ${home_dir}"
     mkdir -p "${home_dir}"
 
@@ -49,16 +51,16 @@ cmd_container_new() {
     fi
 
     log_step "Creating Distrobox container (Ubuntu 26.04)..."
-    local nvidia_args=()
+    local -a nvidia_args=()
     if [[ "${cpu_only}" == "false" ]] && require_cmd nvidia-smi; then
         nvidia_args=("--nvidia")
     fi
 
-    distrobox create \
+    run_with_spinner "Creating container" distrobox create \
         --name      "${name}" \
         --image     "${BASE_IMAGE}" \
         --home      "${home_dir}" \
-        "${nvidia_args[@]}" \
+        ${nvidia_args[@]+"${nvidia_args[@]}"} \
         --pre-init-hooks "mkdir -p /etc/apt/apt.conf.d 2>/dev/null || true; printf 'Dir::Etc::sourcelist \"/etc/apt/sources.list.d/ubuntu.sources\";\nDir::Etc::sourceparts \"/dev/null\";\n' > /etc/apt/apt.conf.d/99-isolate-ubuntu.conf 2>/dev/null || true" \
         --yes
 
@@ -69,15 +71,18 @@ cmd_container_new() {
         export TZ=Etc/UTC
         export HTTP_PROXY=\"\${HTTP_PROXY:-}\"
         export HTTPS_PROXY=\"\${HTTPS_PROXY:-}\"
-        sudo apt-get update -q -o Acquire::Languages=none
-        sudo apt-get upgrade -y -q
-        sudo apt-get install -y -q \
+        sudo apt-get update -o Acquire::Languages=none
+        sudo apt-get upgrade -y
+        sudo apt-get install -y \
             python3 python3-pip python3-venv \
             git curl wget ca-certificates \
             zstd lz4 pigz tar gzip unzip xz-utils \
             procps pciutils jq libzstd-dev \
-            build-essential software-properties-common
+            build-essential software-properties-common \
+            libtcmalloc-minimal4
     "
+
+    steps_end
 
     log_success "Container '${name}' is ready."
     log_info    "Home directory : ${home_dir}"
@@ -108,7 +113,16 @@ cmd_container_list() {
         return 0
     fi
 
-    printf "${BOLD}%-24s %-12s %-10s %-10s %-s${RESET}\n" "NAME" "STATUS" "DATA DIR" "SIZE" "IMAGE"
+    local term_cols
+    term_cols="$(tput cols 2>/dev/null || echo 100)"
+    local name_width=24
+    if (( term_cols >= 120 )); then
+        name_width=30
+    elif (( term_cols < 85 )); then
+        name_width=18
+    fi
+
+    printf "${BOLD}%-${name_width}s %-12s %-10s %-10s %-s${RESET}\n" "NAME" "STATUS" "DATA DIR" "SIZE" "IMAGE"
     printf "${DIM}%s${RESET}\n" "─────────────────────────────────────────────────────────────────────────────────────────"
 
     local has_timeout=false
@@ -124,7 +138,7 @@ cmd_container_list() {
         if [[ -d "$data_dir" ]]; then
             data_label="✓ exists"
             if [[ "${has_timeout}" == "true" ]]; then
-                data_size="$(timeout 3 du -sh "$data_dir" 2>/dev/null | awk '{print $1}')" || data_size="unknown"
+                data_size="$(timeout 2 du -sh --max-depth=0 "$data_dir" 2>/dev/null | awk '{print $1}')" || data_size="unknown"
             else
                 data_size="skipped"
             fi
@@ -133,7 +147,7 @@ cmd_container_list() {
         status_color="${GREEN}"
         [[ "$status" != Up* ]] && status_color="${DIM}"
 
-        printf "${status_color}%-24s${RESET} %-12s %-10s %-10s %-s\n" \
+        printf "${status_color}%-${name_width}s${RESET} %-12s %-10s %-10s %-s\n" \
             "$name" "$status" "$data_label" "$data_size" "$image"
     done <<< "$raw"
 
@@ -188,24 +202,28 @@ cmd_container_rm() {
         [[ "${answer,,}" =~ ^y ]] || { log_info "Aborted."; return 0; }
     fi
 
+    steps_begin 3
     log_step "Stopping any running services in '${name}'..."
-    local tools; tools="$(get_supported_tools)"
-    local t
-    for t in ${tools}; do
-        local pid_f; pid_f="$(pid_file "${name}" "${t}")"
-        if [[ -f "${pid_f}" ]]; then
+    local run_dir="${BASE_DIR}/${name}/.run"
+    if [[ -d "${run_dir}" ]]; then
+        for pid_f in "${run_dir}"/*.pid; do
+            [[ -f "${pid_f}" ]] || continue
+            local t; t="$(basename "${pid_f}" .pid)"
             stop_service_in_container "${name}" "${t}" 5 || true
-        fi
-    done
+        done
+    fi
 
     log_step "Removing container '${name}'..."
-    distrobox rm --force "${name}"
+    run_with_spinner "Removing container" distrobox rm --force "${name}"
 
     if [[ "${purge_data}" -eq 1 ]]; then
         log_step "Purging data directory ${home_dir}..."
-        rm -rf "${home_dir}"
+        run_with_spinner "Deleting files" rm -rf "${home_dir}"
+        steps_end
         log_success "Container '${name}' and data directory purged."
     else
+        log_step "Skipping data directory purge (data preserved)..."
+        steps_end
         log_success "Container '${name}' removed."
         log_info    "Data preserved at : ${home_dir}"
         log_info    "To restore        : localai.sh container new ${name}"

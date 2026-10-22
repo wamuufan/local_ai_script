@@ -1,0 +1,104 @@
+# ==============================================================================
+#  localai.static.conf.disabled — Static Aggressive Memory Strategy Configuration
+# ==============================================================================
+#  To activate this configuration:
+#    cp localai.static.conf.disabled localai.conf
+#
+#  STRATEGY OVERVIEW:
+#    This static configuration applies an explicit, aggressive memory release
+#    strategy by hardcoding memory-saving flags directly for each tool.
+#    - VRAM: Models are unloaded immediately after each request/generation.
+#    - RAM: TCMalloc prevents memory fragmentation and memory bloat over time.
+#    - CUDA: PyTorch memory allocator fragmentation guards prevent false OOM errors.
+#
+#  NOTE: Files ending with '.disabled' are strictly ignored by localai.sh.
+# ==============================================================================
+
+# ─── Ollama Configuration (Aggressive VRAM Release) ───────────────────────────
+[ollama]
+OLLAMA_HOST=0.0.0.0:11434
+
+# Memory Strategy: Immediate VRAM Unload
+# 0: Unload model from VRAM/RAM immediately after request finishes (default is 5m)
+OLLAMA_KEEP_ALIVE=0
+
+# Memory Strategy: Limit parallel context slots to prevent VRAM scaling
+OLLAMA_NUM_PARALLEL=1
+
+# Memory Strategy: Flash Attention (reduces KV-cache VRAM usage and speeds up generation)
+OLLAMA_FLASH_ATTENTION=1
+
+# Maximum VRAM limit for Ollama to use (in MB)
+OLLAMA_MAX_VRAM=8000
+
+# Memory Strategy: TCMalloc allocator optimization (Google Perftools)
+# Prevents RAM bloat and memory fragmentation during prolonged uptime.
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
+
+
+# ─── ComfyUI Configuration (Aggressive VRAM Release) ──────────────────────────
+[comfyui]
+COMFYUI_HOST=0.0.0.0
+COMFYUI_PORT=8188
+
+# Memory Strategy: TCMalloc memory allocator
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
+
+# Memory Strategy: PyTorch CUDA Allocator Fine-Tuning
+# - expandable_segments: True eliminates Out-Of-Memory errors caused by memory fragmentation.
+# - garbage_collection_threshold: 0.8 collects CUDA garbage when nearing 80% usage.
+# - max_split_size_mb: 128 avoids large contiguous block allocation failures.
+PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:128"
+
+# Memory Strategy: Model unloading & memory cleanup for Florence-2 and vision nodes
+FLORENCE2_UNLOAD_IMMEDIATE=1
+
+# Memory Strategy: Aggressive ComfyUI launch arguments
+# --disable-smart-memory    : Offloads models from VRAM immediately after node execution
+# --preview-method auto     : Minimal memory footprint during generation previews
+# --enable-triton-backend   : Memory-efficient attention kernels on Linux
+# (Add '--lowvram' below if your GPU has less than 8GB VRAM)
+COMFYUI_EXTRA_ARGS="--disable-smart-memory --preview-method auto --enable-triton-backend"
+
+
+# ─── Open WebUI Configuration ──────────────────────────────────────────────────
+[openwebui]
+PORT=8080
+HOST=0.0.0.0
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+# Optional settings (remove '#' to enable):
+# WEBUI_AUTH=false              # Disable admin/user login authentication requirement
+# ENABLE_SIGNUP=true            # Enable or disable new user signups
+
+
+# ─── IOPaint Configuration (Image Inpainting & Object Removal) ───────────────
+[iopaint]
+IOPAINT_PORT=8082
+IOPAINT_HOST=0.0.0.0
+IOPAINT_MODEL=lama
+
+# Compute device: 'cpu' for CPU processing, or 'cuda' for NVIDIA GPU acceleration
+# Default: cuda (if NVIDIA GPU detected), otherwise cpu
+IOPAINT_DEVICE=cpu
+
+# Memory Strategy: TCMalloc memory allocator
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
+
+# PyTorch CUDA allocator optimization
+PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
+# Extra IOPaint arguments (e.g., --low-mem if limited VRAM)
+# IOPAINT_EXTRA_ARGS="--low-mem"
+
+
+# ─── Whisper Configuration (Speech-to-Text / Speaches) ───────────────────────
+[whisper]
+WHISPER_HOST=0.0.0.0
+WHISPER_PORT=8083
+# Memory Strategy: Unload STT model immediately after transcription (0 = immediate, 300 = 5m)
+WHISPER_TTL=0
+# Compute type & device ('cuda' or 'cpu', 'float16' or 'int8')
+# WHISPER_DEVICE=cuda
+# WHISPER_COMPUTE_TYPE=int8
+

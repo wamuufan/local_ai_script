@@ -11,6 +11,7 @@ install_comfyui() {
     local comfy_dir="${home_dir}/comfyui"
 
     log_header "Installing ComfyUI → ${container}"
+    log_info "Estimated time: 5-20 min depending on network (PyTorch is the largest download)."
 
     local avail_kb
     avail_kb="$(df -Pk "${home_dir}" 2>/dev/null | awk 'END {print $4}')" || avail_kb=0
@@ -18,37 +19,35 @@ install_comfyui() {
         log_warn "Low disk space detected (<10 GB free on ${home_dir}). ComfyUI installation requires significant disk space."
     fi
 
+    steps_begin 6
+
     log_step "Installing system dependencies..."
-    distrobox enter "${container}" -- bash -c "
-        set -e
-        export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq \
-            python3 python3-venv python3-dev python3-pip \
-            git curl ca-certificates \
-            zstd lz4 pigz tar gzip unzip xz-utils \
-            libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
-            ffmpeg procps pciutils jq libzstd-dev
-    "
+    ensure_base_packages "${container}" \
+        python3 python3-venv python3-dev python3-pip \
+        git curl ca-certificates \
+        zstd lz4 pigz tar gzip unzip xz-utils \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
+        ffmpeg procps pciutils jq libzstd-dev \
+        libtcmalloc-minimal4
 
     log_step "Cloning ComfyUI repository..."
     distrobox enter "${container}" -- bash -c "
         set -e
         if [[ -d '${comfy_dir}' ]]; then
             if git -C '${comfy_dir}' rev-parse --git-dir &>/dev/null; then
-                echo 'ComfyUI git repository found, pulling latest changes...'
-                git -C '${comfy_dir}' pull --ff-only 2>/dev/null || git -C '${comfy_dir}' pull --rebase || {
+                echo '     ComfyUI git repository found, pulling latest changes...'
+                git -C '${comfy_dir}' pull --ff-only --progress || git -C '${comfy_dir}' pull --rebase --progress || {
                     echo 'ERROR: Git update failed. Local changes or merge conflicts exist in ComfyUI directory.' >&2
                     echo 'Please resolve conflicts manually inside the container using: localai.sh shell ${container}' >&2
                     exit 1
                 }
             else
-                echo 'Incomplete or corrupt repository found. Re-cloning ComfyUI...'
+                echo '     Incomplete or corrupt repository found. Re-cloning ComfyUI...'
                 rm -rf '${comfy_dir}'
-                git clone --depth=1 https://github.com/comfyanonymous/ComfyUI.git '${comfy_dir}'
+                git clone --progress --depth=1 https://github.com/comfyanonymous/ComfyUI.git '${comfy_dir}'
             fi
         else
-            git clone --depth=1 https://github.com/comfyanonymous/ComfyUI.git '${comfy_dir}'
+            git clone --progress --depth=1 https://github.com/comfyanonymous/ComfyUI.git '${comfy_dir}'
         fi
     "
 
@@ -57,30 +56,36 @@ install_comfyui() {
         set -e
         if [[ ! -d '${comfy_dir}/.venv' ]]; then
             python3 -m venv '${comfy_dir}/.venv'
+            echo '     Virtual environment created.'
+        else
+            echo '     Virtual environment already exists (skipping).'
         fi
     "
 
-    log_step "Installing Python dependencies (this may take a while)..."
+    log_step "Installing Python dependencies (large download, this may take a while)..."
     distrobox enter "${container}" -- bash -c "
+        set -e
+        ${CONTAINER_HELPERS}
         source '${comfy_dir}/.venv/bin/activate' || { echo 'Failed to activate Python virtual environment' >&2; exit 1; }
         export PIP_CACHE_DIR='${home_dir}/.cache/pip'
+        export PIP_PROGRESS_BAR=on
         mkdir -p \"\${PIP_CACHE_DIR}\"
-        
+
+        echo '     [1/3] Upgrading pip...'
+        pip install --upgrade pip
+        echo '     [2/3] Installing PyTorch...'
+        pip_install_torch torch torchvision torchaudio
         if command -v nvidia-smi &>/dev/null; then
-            echo 'NVIDIA GPU detected — installing stable PyTorch CUDA...'
-            pip install --upgrade pip
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 2>/dev/null || \
-            pip install torch torchvision torchaudio
-            pip install xformers 2>/dev/null || true
+            echo '     Installing xformers (optional)...'
+            pip install xformers || echo '     [!] xformers install failed (optional) — continuing without it.'
         else
-            echo 'No NVIDIA GPU detected. Falling back to CPU-only PyTorch...'
-            echo 'Note: AMD ROCm or Intel Arc GPUs require manual PyTorch installation inside container shell.'
-            pip install --upgrade pip
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+            echo '     Note: AMD ROCm or Intel Arc GPUs require manual PyTorch installation inside container shell.'
         fi
+        echo '     [3/3] Installing ComfyUI requirements...'
         pip install -r '${comfy_dir}/requirements.txt'
     "
 
+    log_step "Creating model folders and writing runtime configuration..."
     mkdir -p \
         "${comfy_dir}/models/checkpoints" \
         "${comfy_dir}/models/loras" \
@@ -93,7 +98,7 @@ install_comfyui() {
         "${home_dir}/.run"
 
     local extra_args="--preview-method none"
-    if command -v nvidia-smi &>/dev/null; then
+    if container_has_gpu "${container}"; then
         extra_args="--preview-method auto --enable-triton-backend --high-ram"
     fi
 
@@ -105,9 +110,10 @@ export COMFYUI_EXTRA_ARGS="${extra_args}"
 EOF
 
     log_step "Verifying PyTorch installation in ComfyUI environment..."
-    if ! distrobox enter "${container}" -- bash -c "source '${comfy_dir}/.venv/bin/activate' && python3 -c 'import torch; print(\"PyTorch version:\", torch.__version__)'"; then
+    if ! distrobox enter "${container}" -- bash -c "source '${comfy_dir}/.venv/bin/activate' && python3 -c 'import torch; print(\"     PyTorch version:\", torch.__version__, \"| CUDA available:\", torch.cuda.is_available())'"; then
         die "ComfyUI PyTorch verification failed. Installation may be incomplete."
     fi
+    steps_end
 
     log_success "ComfyUI installed successfully in '${container}'."
     log_info    "App directory  : ${comfy_dir}"
@@ -115,27 +121,59 @@ EOF
     log_info    "Web UI         : http://localhost:8188  (after start)"
 }
 
+is_installed_comfyui() { local h="${BASE_DIR}/$1"; [[ -d "${h}/comfyui" || -d "${h}/ComfyUI" ]]; }
+
+update_comfyui() {
+    local container="$1"
+    local comfy_dir="${BASE_DIR}/${container}/comfyui"
+    log_header "Updating ComfyUI → ${container}"
+    steps_begin 3
+    log_step "Pulling latest ComfyUI source (git)..."
+    distrobox enter "${container}" -- bash -c "
+        set -e
+        old=\$(git -C '${comfy_dir}' rev-parse --short HEAD)
+        git -C '${comfy_dir}' pull --ff-only --progress
+        new=\$(git -C '${comfy_dir}' rev-parse --short HEAD)
+        if [[ \"\${old}\" == \"\${new}\" ]]; then
+            echo \"     Source already up to date (\${new}).\"
+        else
+            echo \"     Updated \${old} → \${new}:\"
+            git -C '${comfy_dir}' --no-pager log --oneline \"\${old}..\${new}\" | head -n 10 | sed 's/^/       /'
+        fi
+    "
+    log_step "Updating Python requirements..."
+    distrobox enter "${container}" -- bash -c "
+        set -e
+        source '${comfy_dir}/.venv/bin/activate'
+        export PIP_PROGRESS_BAR=on
+        pip install -r '${comfy_dir}/requirements.txt' --upgrade
+    "
+    log_step "Checking if a restart is needed..."
+    if [[ "$(get_tool_status_in_container "${container}" comfyui)" == running* ]]; then
+        log_warn "ComfyUI is running with the old version. Apply with: localai.sh restart ${container}:comfyui"
+    else
+        log_info "ComfyUI is not running; new version will be used on next start."
+    fi
+    steps_end
+    log_success "ComfyUI updated in '${container}'."
+}
+
 start_comfyui() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
-    local pid_f;  pid_f="$(pid_file "${container}" "comfyui")"
+    local pid_f; pid_f="$(pid_file "${container}" "comfyui")"
     local log_f="${LOG_DIR}/${container}/comfyui.log"
 
-    mkdir -p "${home_dir}/.run" "${LOG_DIR}/${container}"
-
-    if [[ -f "${log_f}" ]]; then
-        local size; size="$(stat -c%s "${log_f}" 2>/dev/null || echo 0)"
-        if (( size >= 10485760 )); then
-            mv "${log_f}" "${log_f}.old" 2>/dev/null || true
-        fi
-    fi
-
-    check_and_clean_pid "${container}" "${pid_f}" "ComfyUI" "python" || return 0
-
     local user_env="${home_dir}/.comfyui.user.env"
-    extract_tool_config "${SCRIPT_DIR}/localai.conf" "comfyui" > "${user_env}"
-    if [[ -s "${user_env}" ]]; then
-        log_info "Loaded configuration options from localai.conf [comfyui]."
+    local active_conf
+    if active_conf="$(resolve_config_file "${container}")"; then
+        extract_tool_config "${active_conf}" "comfyui" > "${user_env}"
+        if [[ -s "${user_env}" ]]; then
+            log_info "Loaded configuration options from $(basename "${active_conf}") [comfyui]."
+        fi
+    else
+        > "${user_env}"
+        log_debug "No active configuration file found (.disabled ignored). Using defaults for comfyui."
     fi
 
     local target_port="8188"
@@ -147,14 +185,7 @@ start_comfyui() {
         fi
     fi
 
-    if (echo > "/dev/tcp/127.0.0.1/${target_port}") 2>/dev/null; then
-        log_error "Port ${target_port} is already open/responding on host!"
-        log_info  "ComfyUI or another service appears to be running on http://localhost:${target_port}."
-        return 1
-    fi
-
-    log_step "Starting ComfyUI in '${container}' (background)..."
-    if ! distrobox enter "${container}" -- bash -c "
+    local start_script="
         set -e
         source '${home_dir}/.comfyui.env' 2>/dev/null || true
         source '${home_dir}/.comfyui.user.env' 2>/dev/null || true
@@ -164,43 +195,10 @@ start_comfyui() {
             --port \"\${COMFYUI_PORT:-8188}\" \
             \${COMFYUI_EXTRA_ARGS:-} \
             >> '${log_f}' 2>&1 &
-        pid=\$!
-        success=false
-        for i in \$(seq 1 5); do
-            if kill -0 \"\$pid\" 2>/dev/null; then
-                sleep 1
-                if kill -0 \"\$pid\" 2>/dev/null; then
-                    echo \"\$pid\" > '${pid_f}'
-                    echo \"ComfyUI started with PID \$pid\"
-                    success=true
-                    break
-                fi
-            fi
-            sleep 1
-        done
-        if [[ \"\$success\" != \"true\" ]]; then
-            echo \"ComfyUI failed to start. Check logs: ${log_f}\" >&2
-            exit 1
-        fi
-    "; then
-        log_error "ComfyUI failed to start or stopped immediately. Check logs: ${log_f}"
-        rm -f "${pid_f}"
-        return 1
-    fi
+        echo \"\$!\" > '${pid_f}'
+    "
 
-    if [[ -f "${pid_f}" ]]; then
-        local pid; pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
-        if [[ -n "${pid}" ]]; then
-            wait_for_service "http://localhost:${target_port}" 15 "ComfyUI" || true
-            log_success "ComfyUI started (PID ${pid}). Web UI: http://localhost:${target_port}"
-            log_info    "Logs: ${log_f}"
-            return 0
-        fi
-    fi
-
-    log_error "ComfyUI failed to start or stopped immediately. Check logs: ${log_f}"
-    rm -f "${pid_f}"
-    return 1
+    start_service_in_container "${container}" "comfyui" "${target_port}" "python" "${start_script}" 45 "http://localhost:${target_port}"
 }
 
 stop_comfyui() {
@@ -214,8 +212,10 @@ uninstall_comfyui() {
     log_header "Uninstalling ComfyUI ← ${container}"
     stop_comfyui "${container}" || true
 
+    steps_begin 1
     log_step "Removing ComfyUI application directory and virtualenv..."
-    rm -rf "${home_dir}/comfyui" "${home_dir}/.comfyui.env" "${home_dir}/.comfyui.user.env"
+    run_with_spinner "Removing ComfyUI files" rm -rf "${home_dir}/comfyui" "${home_dir}/.comfyui.env" "${home_dir}/.comfyui.user.env"
+    steps_end
 
     log_success "ComfyUI uninstalled from '${container}'."
 }

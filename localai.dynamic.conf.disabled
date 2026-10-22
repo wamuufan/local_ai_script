@@ -1,0 +1,61 @@
+# ==============================================================================
+#  localai.dynamic.conf.disabled — Dynamic Memory Strategy Configuration
+# ==============================================================================
+#  To activate this configuration:
+#    cp localai.dynamic.conf.disabled localai.conf
+#
+#  HOW IT WORKS:
+#    In this dynamic configuration, you DO NOT need to define memory flags or
+#    parameters for individual tools. Instead, you select a single high-level
+#    strategy below. The script automatically determines and injects the optimal
+#    memory, VRAM, and allocator parameters for Ollama, ComfyUI, and PyTorch.
+#
+#  NOTE: Files ending with '.disabled' are strictly ignored by localai.sh.
+# ==============================================================================
+
+# ─── Dynamic Memory Strategy ──────────────────────────────────────────────────
+[memory]
+# Options:
+#   - aggressive_release   : Aggressive VRAM/RAM reclamation. Models are unloaded
+#                            immediately after each request, single context slot,
+#                            anti-fragmentation CUDA guards, TCMalloc preloaded.
+#   - balanced_caching     : Standard behavior. 5m model cache in Ollama, smart
+#                            caching in ComfyUI for faster consecutive runs.
+#   - high_performance_pinned : Keeps models permanently in VRAM/RAM for maximum
+#                            speed on workstations with 16GB+ VRAM & 64GB+ RAM.
+MEMORY_STRATEGY=aggressive_release
+
+# Automatically clean VRAM and shared memory when a service stops (localai.sh stop)
+AUTO_CLEAN_ON_STOP=true
+
+# Attempt host system filesystem cache drop (sync && drop_caches) during memory clean
+AUTO_DROP_CACHES=false
+
+
+# ─── Network & Service Endpoints Only ─────────────────────────────────────────
+# (Tool-specific memory parameters are omitted here because they are handled
+#  dynamically by the chosen MEMORY_STRATEGY above.)
+
+[ollama]
+OLLAMA_HOST=0.0.0.0:11434
+
+[comfyui]
+COMFYUI_HOST=0.0.0.0
+COMFYUI_PORT=8188
+
+[openwebui]
+PORT=8080
+HOST=0.0.0.0
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+[iopaint]
+IOPAINT_HOST=0.0.0.0
+IOPAINT_PORT=8082
+IOPAINT_MODEL=lama
+# IOPAINT_DEVICE=cpu    # Set to 'cpu' to run IOPaint without GPU/CUDA
+
+[whisper]
+WHISPER_HOST=0.0.0.0
+WHISPER_PORT=8083
+# WHISPER_DEVICE=cpu    # Set to 'cpu' to run Whisper without GPU/CUDA
+

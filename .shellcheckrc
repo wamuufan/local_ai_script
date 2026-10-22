@@ -1,0 +1,7 @@
+shell=bash
+source-path=bin
+source-path=bin/tools
+# SC2034: Variable appears unused (used across sourced modules)
+disable=SC2034
+# SC1091: Not following sourced file
+disable=SC1091

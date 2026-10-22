@@ -11,3 +11,7 @@ log/
 
 # Secrets & Keys
 .webui_secret_key
+*.key
+*.pem
+*.secret
+.env.local
