@@ -99,7 +99,7 @@ install_comfyui() {
 
     local extra_args="--preview-method none"
     if container_has_gpu "${container}"; then
-        extra_args="--preview-method auto --enable-triton-backend --high-ram"
+        extra_args="--preview-method auto --enable-triton-backend --reserve-vram 0.6"
     fi
 
     cat > "${home_dir}/.comfyui.env" <<EOF
@@ -172,8 +172,8 @@ start_comfyui() {
             log_info "Loaded configuration options from $(basename "${active_conf}") [comfyui]."
         fi
     else
-        > "${user_env}"
-        log_debug "No active configuration file found (.disabled ignored). Using defaults for comfyui."
+        extract_tool_config "" "comfyui" > "${user_env}"
+        log_debug "No active configuration file found. Using built-in aggressive_release fallback for comfyui."
     fi
 
     local target_port="8188"

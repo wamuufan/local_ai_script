@@ -234,7 +234,7 @@ start_whisper() {
     if active_conf="$(resolve_config_file "${container}")"; then
         extract_tool_config "${active_conf}" "whisper" > "${user_env}"
     else
-        > "${user_env}"
+        extract_tool_config "" "whisper" > "${user_env}"
     fi
 
     if [[ -n "${saved_model_line}" ]] && ! grep -q -E '^[[:space:]]*export[[:space:]]+WHISPER_MODEL=' "${user_env}"; then
@@ -266,6 +266,7 @@ start_whisper() {
         export UVICORN_HOST=\"\${WHISPER_HOST:-0.0.0.0}\"
         export UVICORN_PORT=\"\${WHISPER_PORT:-${target_port}}\"
         export WHISPER__INFERENCE_DEVICE=\"\${WHISPER_DEVICE:-\${WHISPER_DEFAULT_DEVICE}}\"
+        export WHISPER__COMPUTE_TYPE=\"\${WHISPER_COMPUTE_TYPE:-\${WHISPER_DEFAULT_COMPUTE:-default}}\"
         export STT_MODEL_TTL=\"\${WHISPER_TTL:-300}\"
         if [[ -n \"${target_model}\" ]]; then
             export PRELOAD_MODELS=\"[\\\"${target_model}\\\"]\"
@@ -278,7 +279,7 @@ start_whisper() {
     "
 
     # Health check url is usually /health for speaches, but let's just check the root or /v1/models
-    start_service_in_container "${container}" "whisper" "${target_port}" "python|speaches" "${start_script}" 30 "http://localhost:${target_port}/v1/models"
+    start_service_in_container "${container}" "whisper" "${target_port}" "python|uvicorn|speaches" "${start_script}" 30 "http://localhost:${target_port}/v1/models"
 }
 
 stop_whisper() {

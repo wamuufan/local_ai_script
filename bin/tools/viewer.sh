@@ -91,12 +91,14 @@ if gtk_version == 3:
         except Exception:
             pass
 
+    WebKit2.WebContext.get_default().set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
     view = WebKit2.WebView()
     settings = view.get_settings()
     settings.set_enable_webgl(True)
     settings.set_enable_smooth_scrolling(True)
     settings.set_enable_developer_extras(False)
-    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ALWAYS)
+    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ON_DEMAND)
+    settings.set_enable_page_cache(False)
 
     # Automatically set window & taskbar icon when web app favicon loads
     def on_favicon_changed(web_view, pspec):
@@ -175,6 +177,7 @@ else:
         settings.set_enable_webgl(True)
         settings.set_enable_smooth_scrolling(True)
         settings.set_enable_developer_extras(False)
+        settings.set_enable_page_cache(False)
 
         # Keyboard shortcuts helper
         key_controller = Gtk.EventControllerKey.new()

@@ -230,7 +230,7 @@ status_service_in_container() {
         else
             log_warn "${tool_name} PID file exists (${pid}) but process is NOT running (stale PID). Cleaning up..."
             rm -f "${pid_f}"
-            return 1
+            return 0
         fi
     else
         log_info "${tool_name} is STOPPED."

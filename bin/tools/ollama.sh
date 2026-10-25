@@ -132,8 +132,8 @@ start_ollama() {
             log_info "Loaded configuration options from $(basename "${active_conf}") [ollama]."
         fi
     else
-        > "${user_env}"
-        log_debug "No active configuration file found (.disabled ignored). Using defaults for ollama."
+        extract_tool_config "" "ollama" > "${user_env}"
+        log_debug "No active configuration file found. Using built-in aggressive_release fallback for ollama."
     fi
 
     local target_port="11434"

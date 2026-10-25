@@ -124,8 +124,8 @@ start_iopaint() {
             log_info "Loaded configuration options from $(basename "${active_conf}") [iopaint]."
         fi
     else
-        > "${user_env}"
-        log_debug "No active configuration file found (.disabled ignored). Using defaults for iopaint."
+        extract_tool_config "" "iopaint" > "${user_env}"
+        log_debug "No active configuration file found. Using built-in aggressive_release fallback for iopaint."
     fi
 
     local target_port="8082"

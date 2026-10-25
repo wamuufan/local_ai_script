@@ -141,7 +141,7 @@ memory_status() {
             echo -e "${BOLD}Active Config  :${RESET} ${active_conf} (${CYAN}Direct Static Configuration${RESET})"
         fi
     else
-        echo -e "${BOLD}Active Config  :${RESET} ${DIM}None active (.disabled files ignored, using built-in defaults)${RESET}"
+        echo -e "${BOLD}Active Config  :${RESET} ${DIM}None (using built-in aggressive_release fallback)${RESET}"
     fi
 }
 

@@ -347,22 +347,26 @@ cmd_logs() {
         local container="${arg%%:*}"
         local tools="${arg#*:}"
 
-        local expanded_tools; expanded_tools="$(_expand_container_tools "${container}" "${tools}")"
-        for tool in ${expanded_tools}; do
+        local -a expanded_tools=($(_expand_container_tools "${container}" "${tools}"))
+        for tool in "${expanded_tools[@]}"; do
             [[ -z "${tool}" ]] && continue
 
-            local log_f="${LOG_DIR}/${container}/${tool}.log"
-            if [[ ! -f "${log_f}" ]]; then
-                log_error "No log file found for ${tool} in '${container}' (${log_f})."
+            local log_file="${LOG_DIR}/${container}/${tool}.log"
+            if [[ ! -f "${log_file}" ]]; then
+                if [[ "${#expanded_tools[@]}" -gt 1 ]]; then
+                    log_warn "No log file found for ${tool} in ${container} (skipping)."
+                    continue
+                fi
+                log_error "No log file found for ${tool} in '${container}' (${log_file})."
                 log_info  "Please start the service first using: localai.sh start ${container}:${tool}"
                 exit 1
             fi
-            log_files+=("${log_f}")
+            log_files+=("${log_file}")
         done
     done
 
     if [[ ${#log_files[@]} -eq 0 ]]; then
-        die "No valid log files specified or found."
+        die "No log files found to display."
     fi
 
     if [[ "${follow}" == "true" ]]; then
@@ -679,7 +683,11 @@ ${BOLD}SUPPORTED TOOLS${RESET}
   ${CYAN}viewer${RESET}          Ultra-lightweight native WebKitGTK app window (no address bar)
                   ${DIM}RAM: ~45MB | Launcher: ~/.local/bin/localai-viewer${RESET}
 
-${BOLD}MEMORY MANAGEMENT${RESET}
+${BOLD}CONFIGURATION & MEMORY MANAGEMENT${RESET}
+  ${CYAN}config${RESET} [show|profile <name>]
+      Show active localai.conf status or switch global memory profile
+      (${DIM}aggressive, balanced, performance${RESET}).
+
   ${CYAN}memory status${RESET} [<container>]
       Display host RAM, Swap, NVIDIA GPU VRAM, and AI process memory usage.
 
@@ -778,6 +786,7 @@ main() {
         model)      cmd_model      "$@" ;;
         transcribe) cmd_transcribe "$@" ;;
         doctor)     cmd_doctor          ;;
+        config)     cmd_config     "$@" ;;
         memory)     cmd_memory     "$@" ;;
         version|-V|--version) echo "localai.sh v${SCRIPT_VERSION}" ;;
         help|-h|--help) cmd_help        ;;

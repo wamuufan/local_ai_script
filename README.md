@@ -33,6 +33,7 @@
   - [shell](#shell)
   - [model](#model)
   - [transcribe](#transcribe)
+  - [config](#config)
   - [memory](#memory)
 - [Configuration & Memory Profiles](#configuration--memory-profiles)
 - [File System Layout](#file-system-layout)
@@ -159,7 +160,7 @@ localai.sh start image-gen:comfyui
 The following flags can precede any command:
 
 - `-v`, `--verbose` : Enable detailed debug output and trace execution.
-- `-c <file>`, `--config <file>` : Specify a custom configuration file path (defaults to auto-detecting `localai.conf` or `<container>.conf`).
+- `-c <file>`, `--config <file>` : Specify a custom configuration file path (defaults to auto-detecting `localai.conf`).
 
 ```bash
 localai.sh -v status
@@ -491,6 +492,21 @@ localai.sh transcribe speech:whisper podcast.m4a --format srt
 
 ---
 
+### `config`
+
+Displays the active `localai.conf` path and memory strategy, or switches the global memory profile in place.
+
+```bash
+# Show active configuration file and memory strategy
+localai.sh config
+localai.sh config show
+
+# Switch global memory profile (updates localai.conf safely)
+localai.sh config profile <aggressive|balanced|performance>
+```
+
+---
+
 ### `memory`
 
 Monitors and aggressively manages RAM, Swap, NVIDIA GPU VRAM, and AI process allocations.
@@ -553,6 +569,7 @@ localai.sh memory clean [<container>] [--all|--vram|--ram|--cache]
 │   └── .<tool>.user.env            # User/config overrides per tool
 │
 <project-root>/
+├── localai.conf                    # Unified configuration & memory profile
 └── log/
     ├── <container>/                # Per-container service logs
     │   ├── ollama.log
@@ -718,32 +735,53 @@ localai.sh open my-ai-lab:openwebui
 
 ---
 
-## Configuration & Memory Strategies
+## Configuration & Memory Profiles
 
-`localai.sh` provides two disabled configuration templates out of the box:
-- `localai.dynamic.conf.disabled`: Dynamic strategy-based configuration (`MEMORY_STRATEGY=aggressive_release | balanced_caching | high_performance_pinned`). Automatically tunes VRAM unloading, smart memory, PyTorch CUDA fragmentation guards, and post-stop reclamation.
-- `localai.static.conf.disabled`: Direct static configuration with all aggressive memory-saving parameters pre-configured and explained line-by-line (`keep_alive=0`, `num_parallel=1`, `--disable-smart-memory`, `PYTORCH_CUDA_ALLOC_CONF`, TCMalloc).
+`localai.sh` uses a single unified `localai.conf` configuration file out of the box, pre-tuned especially for tight VRAM budgets like **RTX 4060 Mobile (8 GB VRAM)**:
 
-> ℹ️ **NOTE**: Files ending with `.disabled` are strictly ignored by the script.
+1. **Quick Profile Mode**: Set `MEMORY_STRATEGY` under `[memory]` (or run `localai.sh config profile <aggressive|balanced|performance>`) to apply baseline VRAM/RAM optimizations (`aggressive_release`, `balanced_caching`, or `high_performance_pinned`).
+2. **Fine-Tuning Mode**: Any explicit `KEY=VALUE` parameter defined under a tool section (`[ollama]`, `[comfyui]`, `[openwebui]`, `[iopaint]`, `[whisper]`) overrides the baseline strategy defaults.
+
+**Configuration Resolution Priority:**
+1. `LOCALAI_CONFIG` environment variable (or `-c` / `--config <file>`)
+2. `${XDG_CONFIG_HOME:-~/.config}/localai/localai.conf`
+3. `<project-root>/localai.conf`
+4. Built-in `aggressive_release` fallback (if no config file is found)
 
 ### Memory Strategies Explained
 
 | Strategy | VRAM & RAM Management Behavior | Recommended For |
 | :--- | :--- | :--- |
-| `aggressive_release` | Immediate VRAM model offloading (`keep_alive=0`, `--disable-smart-memory`), single concurrent context slot, PyTorch allocator anti-fragmentation guards, TCMalloc preloaded. | GPUs ≤ 12GB VRAM or systems ≤ 32GB RAM |
-| `balanced_caching` | 5-minute model warm retention in Ollama, ComfyUI smart memory caching active for fast consecutive generations. | Systems with 16GB VRAM & 32GB–64GB RAM |
+| `aggressive_release` | Immediate VRAM model offloading (`keep_alive=0`, `--disable-smart-memory`), single model slot (`OLLAMA_MAX_LOADED_MODELS=1`), 8-bit KV-cache (`OLLAMA_KV_CACHE_TYPE=q8_0`), VRAM desktop reservation (`OLLAMA_GPU_OVERHEAD=536870912`, `--reserve-vram 0.6`), Open WebUI embeddings on CPU (`DEVICE_TYPE=cpu`), PyTorch allocator anti-fragmentation guards, TCMalloc preloaded. | GPUs ≤ 8GB–12GB VRAM (e.g. RTX 4060 Mobile) or systems ≤ 32GB RAM |
+| `balanced_caching` | 5-minute model warm retention in Ollama (`keep_alive=5m`), ComfyUI smart memory caching active, 8-bit KV-cache (`q8_0`), single model slot, VRAM reservation (`OLLAMA_GPU_OVERHEAD=536870912`, `--reserve-vram 0.6`), Open WebUI on CPU (`DEVICE_TYPE=cpu`). | Systems with 8GB–16GB VRAM & 32GB–64GB RAM |
 | `high_performance_pinned` | Models permanently pinned in VRAM (`keep_alive=-1`), up to 4 parallel contexts, `--highvram` enabled in ComfyUI. | Dedicated AI workstations (24GB+ VRAM & 64GB+ RAM) |
 
-### Activating a Configuration
+### Key 8GB VRAM Optimization Parameters
 
-To enable a configuration mode, remove the `.disabled` suffix (or copy to `localai.conf`):
+- **`OLLAMA_MAX_LOADED_MODELS=1`**: Limits simultaneously loaded models in VRAM to 1, preventing multiple models from exhausting the 8GB VRAM pool.
+- **`OLLAMA_KV_CACHE_TYPE=q8_0`**: Employs 8-bit KV-cache quantization, cutting context VRAM consumption by ~50% with negligible perplexity loss.
+- **`OLLAMA_GPU_OVERHEAD=536870912`**: Explicitly reserves 512 MB VRAM for host desktop / display server (Xorg/Wayland) to avoid CUDA Out-Of-Memory crashes.
+- **`COMFYUI_EXTRA_ARGS="... --reserve-vram 0.6 ..."`**: Directs ComfyUI to reserve 600 MB VRAM for the host OS and desktop environment.
+- **`DEVICE_TYPE=cpu` & `USE_CUDA_DOCKER=false` (Open WebUI)**: Pins internal RAG/sentence-transformers embedding models to CPU, ensuring 100% of GPU VRAM is available for Ollama LLMs.
+- **`IOPAINT_EXTRA_ARGS="--low-mem"` & `PYTORCH_CUDA_ALLOC_CONF`**: Enables low-memory processing and strict PyTorch memory segment fragmentation guards (`expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:128`).
+- **WebKitGTK Native Viewer**: Configured with `DOCUMENT_VIEWER` cache model, on-demand hardware acceleration (`ON_DEMAND`), and disabled page cache to minimize window footprint (~45 MB RAM).
+
+### Managing Configuration & Profiles
+
+You can inspect or switch memory profiles directly via the CLI, or edit `localai.conf` manually:
 
 ```bash
-# Option 1: Activate dynamic memory strategy configuration (Recommended)
-cp localai.dynamic.conf.disabled localai.conf
+# View active configuration file and memory strategy
+localai.sh config show
 
-# Option 2: Activate direct static configuration
-cp localai.static.conf.disabled localai.conf
+# Switch to aggressive VRAM/RAM release (default, ideal for 8GB VRAM)
+localai.sh config profile aggressive
+
+# Switch to balanced caching (5m idle retention)
+localai.sh config profile balanced
+
+# Switch to high-performance pinned mode (16GB+ / 24GB+ VRAM)
+localai.sh config profile performance
 ```
 
 ---

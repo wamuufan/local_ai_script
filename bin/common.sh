@@ -251,7 +251,7 @@ check_container_exists() {
     if ! require_cmd distrobox; then
         return 1
     fi
-    get_all_containers | grep -qx "$name"
+    get_all_containers | grep -Fxq -- "$name"
 }
 
 assert_container_exists() {

@@ -94,8 +94,8 @@ start_openwebui() {
             log_info "Loaded configuration options from $(basename "${active_conf}") [openwebui]."
         fi
     else
-        > "${user_env}"
-        log_debug "No active configuration file found (.disabled ignored). Using defaults for openwebui."
+        extract_tool_config "" "openwebui" > "${user_env}"
+        log_debug "No active configuration file found. Using built-in aggressive_release fallback for openwebui."
     fi
 
     local port="8080"
