@@ -82,7 +82,7 @@ install_comfyui() {
             echo '     Note: AMD ROCm or Intel Arc GPUs require manual PyTorch installation inside container shell.'
         fi
         echo '     [3/3] Installing ComfyUI requirements...'
-        pip install -r '${comfy_dir}/requirements.txt'
+        pip install -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
     "
 
     log_step "Creating model folders and writing runtime configuration..."
@@ -138,7 +138,7 @@ update_comfyui() {
             echo \"     Source already up to date (\${new}).\"
         else
             echo \"     Updated \${old} → \${new}:\"
-            git -C '${comfy_dir}' --no-pager log --oneline \"\${old}..\${new}\" | head -n 10 | sed 's/^/       /'
+            git -C '${comfy_dir}' --no-pager log --oneline \"\${old}..\${new}\" | head -n 10 | sed 's/^/       /' || true
         fi
     "
     log_step "Updating Python requirements..."
@@ -146,7 +146,7 @@ update_comfyui() {
         set -e
         source '${comfy_dir}/.venv/bin/activate'
         export PIP_PROGRESS_BAR=on
-        pip install -r '${comfy_dir}/requirements.txt' --upgrade
+        pip install -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
     "
     log_step "Checking if a restart is needed..."
     if [[ "$(get_tool_status_in_container "${container}" comfyui)" == running* ]]; then

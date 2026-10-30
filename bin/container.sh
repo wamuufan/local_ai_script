@@ -74,9 +74,10 @@ cmd_container_new() {
         sudo apt-get update -o Acquire::Languages=none
         sudo apt-get upgrade -y
         sudo apt-get install -y \
-            python3 python3-pip python3-venv \
+            python3 python3-pip python3-venv python3-dev \
             git curl wget ca-certificates \
             zstd lz4 pigz tar gzip unzip xz-utils \
+            libgl1 libglib2.0-0 ffmpeg \
             procps pciutils jq libzstd-dev \
             build-essential software-properties-common \
             libtcmalloc-minimal4

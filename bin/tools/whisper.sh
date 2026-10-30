@@ -23,23 +23,23 @@ install_whisper() {
     steps_begin 5
 
     log_step "Installing system dependencies (ffmpeg, etc.)..."
-    ensure_base_packages "${container}" git curl ca-certificates ffmpeg procps jq
+    ensure_base_packages "${container}" git curl ca-certificates ffmpeg procps jq \
+        python3 python3-venv python3-dev python3-pip libtcmalloc-minimal4
 
-    log_step "Installing Miniforge and creating Python 3.12 environment..."
+    log_step "Creating Python virtual environment..."
     distrobox enter "${container}" -- bash -c "
         set -e
         ${CONTAINER_HELPERS}
         mkdir -p '${whisper_dir}'
-        rm -rf '${whisper_dir}/.venv'
-        install_miniforge '${whisper_dir}/conda' '${home_dir}/.cache'
-        ensure_conda_env  '${whisper_dir}/conda' whisper 3.12
+        rm -rf '${whisper_dir}/conda'
+        ensure_python_venv '${whisper_dir}/.venv'
     "
 
     log_step "Installing Speaches (faster-whisper) and PyTorch (large download)..."
     distrobox enter "${container}" -- bash -c "
         set -e
         ${CONTAINER_HELPERS}
-        source '${whisper_dir}/conda/bin/activate' whisper
+        source '${whisper_dir}/.venv/bin/activate'
         export PIP_CACHE_DIR='${home_dir}/.cache/pip'
         export PIP_PROGRESS_BAR=on
         mkdir -p \"\${PIP_CACHE_DIR}\"
@@ -65,8 +65,7 @@ install_whisper() {
     cat > "${home_dir}/.whisper.env" <<EOF
 # Whisper (Speaches) runtime environment
 export WHISPER_DIR="${whisper_dir}"
-export WHISPER_CONDA="${whisper_dir}/conda"
-export WHISPER_ENV_NAME="whisper"
+export WHISPER_VENV="${whisper_dir}/.venv"
 export HF_HOME="${models_dir}"
 export WHISPER_DEFAULT_DEVICE="${default_device}"
 export WHISPER_COMPUTE_TYPE="${default_compute}"
@@ -74,7 +73,7 @@ EOF
     log_info "Device: ${default_device} / compute type: ${default_compute}"
 
     log_step "Verifying Whisper installation..."
-    if ! distrobox enter "${container}" -- bash -c "source '${whisper_dir}/conda/bin/activate' whisper && python -c 'import speaches' &>/dev/null"; then
+    if ! distrobox enter "${container}" -- bash -c "source '${whisper_dir}/.venv/bin/activate' && python3 -c 'import speaches' &>/dev/null"; then
         die "Speaches verification failed. Installation may be incomplete."
     fi
     steps_end
@@ -99,7 +98,11 @@ update_whisper() {
     log_step "Upgrading speaches and huggingface_hub via pip..."
     distrobox enter "${container}" -- bash -c "
         set -e
-        source '${whisper_dir}/conda/bin/activate' whisper
+        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
+            source '${whisper_dir}/.venv/bin/activate'
+        else
+            source '${whisper_dir}/conda/bin/activate' whisper
+        fi
         old=\$(pip show speaches 2>/dev/null | grep '^Version:' | awk '{print \$2}')
         echo \"     Current speaches version: \${old:-unknown}\"
         pip install --upgrade git+https://github.com/speaches-ai/speaches.git huggingface_hub
@@ -133,7 +136,7 @@ pull_model_whisper() {
     local user_env="${home_dir}/.whisper.user.env"
     local model_cache="${whisper_dir}/models/hub/models--${model//\//--}"
 
-    if [[ ! -x "${whisper_dir}/conda/envs/whisper/bin/python" ]]; then
+    if [[ ! -x "${whisper_dir}/.venv/bin/python" && ! -x "${whisper_dir}/conda/envs/whisper/bin/python" ]]; then
         die "Whisper is not installed in '${container}'. Install it first: localai.sh install ${container}:whisper"
     fi
     
@@ -145,7 +148,11 @@ pull_model_whisper() {
     log_info "Interrupted downloads resume automatically when you re-run this command."
     distrobox enter "${container}" -- bash -c "
         set -e
-        source '${whisper_dir}/conda/bin/activate' whisper
+        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
+            source '${whisper_dir}/.venv/bin/activate'
+        else
+            source '${whisper_dir}/conda/bin/activate' whisper
+        fi
         export HF_HOME='${whisper_dir}/models'
         unset HF_HUB_DISABLE_PROGRESS_BARS
         if command -v hf &>/dev/null; then
@@ -261,7 +268,11 @@ start_whisper() {
         set -e
         source '${home_dir}/.whisper.env' 2>/dev/null || true
         source '${home_dir}/.whisper.user.env' 2>/dev/null || true
-        source \"\${WHISPER_CONDA}/bin/activate\" \"\${WHISPER_ENV_NAME:-whisper}\"
+        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
+            source '${whisper_dir}/.venv/bin/activate'
+        elif [[ -f \"\${WHISPER_CONDA:-${whisper_dir}/conda}/bin/activate\" ]]; then
+            source \"\${WHISPER_CONDA:-${whisper_dir}/conda}/bin/activate\" \"\${WHISPER_ENV_NAME:-whisper}\"
+        fi
         
         export UVICORN_HOST=\"\${WHISPER_HOST:-0.0.0.0}\"
         export UVICORN_PORT=\"\${WHISPER_PORT:-${target_port}}\"
@@ -297,8 +308,8 @@ uninstall_whisper() {
 
     log_step "Removing Whisper application directory and virtualenv..."
     # Keep models directory by default to save bandwidth, unless purged
-    run_with_spinner "Deleting conda environment and config files" \
-        rm -rf "${home_dir}/whisper/conda" "${home_dir}/.whisper.env" "${home_dir}/.whisper.user.env"
+    run_with_spinner "Deleting virtual environment and config files" \
+        rm -rf "${home_dir}/whisper/.venv" "${home_dir}/whisper/conda" "${home_dir}/.whisper.env" "${home_dir}/.whisper.user.env"
     steps_end
     log_info "Note: Downloaded models in ${home_dir}/whisper/models were kept. Delete them manually if you want to free up space."
 

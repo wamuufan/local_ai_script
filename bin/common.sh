@@ -291,50 +291,27 @@ ensure_base_packages() {
     "
 }
 
-# Shell helpers that run INSIDE the container (Miniforge install with visible,
-# resumable download; conda env creation; PyTorch install with visible fallback).
+# Shell helpers that run INSIDE the container (native Python venv creation;
+# PyTorch install with automatic GPU/CPU selection).
 # Usage:  distrobox enter c -- bash -c "${CONTAINER_HELPERS}
-#             install_miniforge <prefix> <cache_dir>
-#             ensure_conda_env  <prefix> <env_name> <python_version>
+#             ensure_python_venv <venv_dir>
 #             pip_install_torch torch torchvision ..."
 readonly CONTAINER_HELPERS='
-install_miniforge() {
-    local prefix="$1" cache_dir="$2"
-    if [[ -x "${prefix}/bin/conda" ]]; then
-        echo "     Miniforge already present at ${prefix} (skipping)."
+ensure_python_venv() {
+    local venv_dir="$1"
+    if [[ -x "${venv_dir}/bin/python" ]]; then
+        echo "     Python virtual environment already present at ${venv_dir} (skipping)."
         return 0
     fi
-    mkdir -p "${cache_dir}"
-    local inst="${cache_dir}/miniforge.sh"
-    if [[ ! -s "${inst}" ]]; then
-        echo "     Downloading Miniforge installer (~90 MB)..."
-        curl -fL --progress-bar -C - -o "${inst}.part" \
-            https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-        mv -f "${inst}.part" "${inst}"
-    else
-        echo "     Using cached Miniforge installer: ${inst}"
-    fi
-    echo "     Extracting Miniforge to ${prefix}..."
-    bash "${inst}" -b -u -p "${prefix}"
-    echo "     Miniforge installed."
-}
-ensure_conda_env() {
-    local prefix="$1" name="$2" py="$3"
-    if "${prefix}/bin/conda" env list | grep -q "^${name} "; then
-        echo "     Conda environment \"${name}\" already exists (skipping)."
-    else
-        echo "     Creating conda environment \"${name}\" (Python ${py})..."
-        "${prefix}/bin/conda" create -y -n "${name}" "python=${py}"
-    fi
+    echo "     Creating Python virtual environment at ${venv_dir}..."
+    python3 -m venv "${venv_dir}"
+    echo "     Virtual environment created."
 }
 pip_install_torch() {
     # $@ = packages, e.g. torch torchvision torchaudio
     if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
-        echo "     NVIDIA GPU detected — installing CUDA PyTorch (~2.5 GB download, please wait)..."
-        if ! pip install "$@" --index-url https://download.pytorch.org/whl/cu124; then
-            echo "     [!] CUDA 12.4 wheel install failed — falling back to default PyPI PyTorch build..."
-            pip install "$@"
-        fi
+        echo "     NVIDIA GPU detected — installing latest CUDA PyTorch (~2.5 GB download, please wait)..."
+        pip install "$@"
     else
         echo "     No NVIDIA GPU detected — installing CPU-only PyTorch (~200 MB)..."
         pip install "$@" --index-url https://download.pytorch.org/whl/cpu

@@ -257,7 +257,7 @@ localai.sh install speech:whisper
 
 ### `uninstall`
 
-Uninstalls installed tool(s) and their virtual/conda environments from a container while keeping persistent models. Supports the `<container>:all` shortcut to uninstall all installed tools (including `viewer`).
+Uninstalls installed tool(s) and their virtual environments from a container while keeping persistent models. Supports the `<container>:all` shortcut to uninstall all installed tools (including `viewer`).
 
 ```bash
 localai.sh uninstall <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
@@ -283,8 +283,8 @@ localai.sh update <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
 **What it does per tool:**
 - **Ollama**: Re-executes the official installer to update the binary.
 - **ComfyUI**: Performs `git pull --ff-only` and upgrades requirements via `pip install -r requirements.txt --upgrade`.
-- **Open WebUI**: Runs `pip install --upgrade open-webui` inside its conda environment.
-- **IOPaint**: Runs `pip install --upgrade iopaint` inside its conda environment.
+- **Open WebUI**: Runs `pip install --upgrade open-webui` inside its virtual environment.
+- **IOPaint**: Runs `pip install --upgrade iopaint` inside its virtual environment.
 - **Whisper**: Upgrades pip tooling, dependencies, and `speaches`.
 
 **Examples:**
@@ -542,7 +542,7 @@ localai.sh memory clean [<container>] [--all|--vram|--ram|--cache]
 │   │   └── models/                 # Downloaded Ollama models (persistent)
 │   │
 │   ├── .openwebui/
-│   │   ├── conda/                  # Miniforge Python environment
+│   │   ├── .venv/                  # Python virtual environment (Ubuntu 26.04 python3-venv)
 │   │   └── data/                   # User data and configurations
 │   │
 │   ├── comfyui/
@@ -558,11 +558,11 @@ localai.sh memory clean [<container>] [--all|--vram|--ram|--cache]
 │   │   └── custom_nodes/           # ComfyUI extensions
 │   │
 │   ├── iopaint/
-│   │   ├── conda/                  # Miniforge Python environment
+│   │   ├── .venv/                  # Python virtual environment (Ubuntu 26.04 python3-venv)
 │   │   └── models/                 # Downloaded inpainting models
 │   │
 │   ├── whisper/
-│   │   ├── conda/                  # Miniforge Python environment
+│   │   ├── .venv/                  # Python virtual environment (Ubuntu 26.04 python3-venv)
 │   │   └── models/                 # Downloaded HuggingFace STT models
 │   │
 │   ├── .localai.env                # Base container environment configuration
@@ -626,7 +626,7 @@ ollama list
 |---|---|
 | Source | GitHub `comfyanonymous/ComfyUI` |
 | Web UI port | `8188` |
-| PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
+| PyTorch | Auto-detected: Latest CUDA (if NVIDIA GPU) or CPU-only |
 | Models dir | `~/.local/containers/<name>/comfyui/models/checkpoints/` |
 | Logs | `log/<container>/comfyui.log` |
 
@@ -645,7 +645,7 @@ ollama list
 |---|---|
 | Source | Official PyPi `open-webui` |
 | Web UI port | `8080` |
-| Environment | Dedicated Miniforge Python 3.11 |
+| Environment | Dedicated Python virtual environment (`python3-venv`) |
 | Data dir | `~/.local/containers/<name>/.openwebui/data/` |
 | Logs | `log/<container>/openwebui.log` |
 
@@ -664,8 +664,8 @@ localai.sh start <container>:ollama,openwebui
 |---|---|
 | Source | Official PyPI `iopaint` |
 | Web UI port | `8082` |
-| Environment | Dedicated Miniforge Python 3.10 |
-| PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
+| Environment | Dedicated Python virtual environment (`python3-venv`) |
+| PyTorch | Auto-detected: Latest CUDA (if NVIDIA GPU) or CPU-only |
 | Models dir | `~/.local/containers/<name>/iopaint/models/` |
 | Logs | `log/<container>/iopaint.log` |
 
@@ -686,8 +686,8 @@ localai.sh start <container>:iopaint
 |---|---|
 | Source | PyPI `speaches` (`faster-whisper`) |
 | API port | `8083` |
-| Environment | Dedicated Miniforge Python 3.12 |
-| PyTorch | Auto-detected: CUDA (if NVIDIA GPU) or CPU-only |
+| Environment | Dedicated Python virtual environment (`python3-venv`) |
+| PyTorch | Auto-detected: Latest CUDA (if NVIDIA GPU) or CPU-only |
 | App & Models dir | `~/.local/containers/<name>/whisper` (`~/.local/containers/<name>/whisper/models/`) |
 | Logs | `log/<container>/whisper.log` |
 
