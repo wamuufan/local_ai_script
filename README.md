@@ -90,6 +90,7 @@ All containers are NVIDIA-passthrough enabled out of the box. Model files, outpu
 | Dependency | Purpose |
 |---|---|
 | `nvidia-smi` | GPU passthrough & CUDA detection |
+| `nvidia-ctk` | NVIDIA Container Toolkit (auto-generates rootless CDI specification in `~/.config/cdi/nvidia.yaml`) |
 | `nvcc` | CUDA compilation inside containers |
 
 > Run `localai.sh doctor` to automatically check all dependencies.
@@ -239,10 +240,14 @@ localai.sh container new <name>   # data in ~/.local/containers/<name>/ is reuse
 Installs a supported AI tool inside an existing container. All install functions are **idempotent** — re-running them is safe.
 
 ```bash
-localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+localai.sh install [--no-install-comfyui-manager] [--ignore-requires-python] <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```
 
 > ℹ️ Note: The `all` target is not supported for `install`. Explicit tool names must be specified.
+
+**Options:**
+- `--no-install-comfyui-manager` / `--no-manager`: Skip automatic ComfyUI-Manager extension installation when installing ComfyUI.
+- `--ignore-requires-python`: Explicitly instruct `pip` to ignore `Requires-Python` package version constraints. Note that `localai.sh` also includes an **automatic fallback mechanism**: if a standard `pip install` fails due to strict `Requires-Python` upper bounds (such as `<3.13` on Ubuntu 26.04 running Python 3.14+), it automatically retries with `--ignore-requires-python`.
 
 **Supported tools:** `ollama`, `comfyui`, `openwebui`, `iopaint`, `whisper`, `viewer`
 
@@ -250,7 +255,8 @@ localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
 ```bash
 localai.sh install my-ai-lab:ollama
 localai.sh install image-gen:comfyui
-localai.sh install speech:whisper
+localai.sh install image-gen:comfyui --no-install-comfyui-manager
+localai.sh install speech:whisper --ignore-requires-python
 ```
 
 ---
@@ -277,12 +283,15 @@ localai.sh uninstall my-ai-lab:all          # Uninstalls all tools installed in 
 Updates installed tool(s) to their latest release or commit inside the container. Supports the `<container>:all` shortcut to update all installed services.
 
 ```bash
-localai.sh update <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
+localai.sh update [--ignore-requires-python] <container>:<tool1,tool2,...|all> [<container2>:<tool3,...>]
 ```
+
+**Options:**
+- `--ignore-requires-python`: Explicitly instruct `pip` to ignore `Requires-Python` version constraints during tool upgrades. (Automatic fallback to `--ignore-requires-python` is also triggered if a standard pip update fails due to Python version limits).
 
 **What it does per tool:**
 - **Ollama**: Re-executes the official installer to update the binary.
-- **ComfyUI**: Performs `git pull --ff-only` and upgrades requirements via `pip install -r requirements.txt --upgrade`.
+- **ComfyUI**: Performs `git pull --ff-only` for ComfyUI (and ComfyUI-Manager if installed) and syncs requirements via `pip install -r requirements.txt`.
 - **Open WebUI**: Runs `pip install --upgrade open-webui` inside its virtual environment.
 - **IOPaint**: Runs `pip install --upgrade iopaint` inside its virtual environment.
 - **Whisper**: Upgrades pip tooling, dependencies, and `speaches`.
@@ -293,6 +302,7 @@ localai.sh update my-ai-lab:ollama
 localai.sh update image-gen:comfyui
 localai.sh update my-ai-lab:ollama,openwebui
 localai.sh update my-ai-lab:all
+localai.sh update --ignore-requires-python speech:whisper
 ```
 
 ---
@@ -627,8 +637,11 @@ ollama list
 | Source | GitHub `comfyanonymous/ComfyUI` |
 | Web UI port | `8188` |
 | PyTorch | Auto-detected: Latest CUDA (if NVIDIA GPU) or CPU-only |
+| ComfyUI-Manager | Auto-installed by default (`custom_nodes/ComfyUI-Manager`) |
 | Models dir | `~/.local/containers/<name>/comfyui/models/checkpoints/` |
 | Logs | `log/<container>/comfyui.log` |
+
+> 💡 **ComfyUI-Manager:** By default, [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) is automatically installed and kept up to date during `localai.sh update`. To skip installing it, use `--no-install-comfyui-manager` (or `--no-manager`) during install, or set `COMFYUI_INSTALL_MANAGER=false` in `localai.conf`.
 
 **Drop your `.safetensors` or `.ckpt` checkpoint files into:**
 ```

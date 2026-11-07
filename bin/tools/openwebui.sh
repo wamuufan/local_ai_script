@@ -5,6 +5,51 @@
 
 set -euo pipefail
 
+# Helper function to install or update Open WebUI and its dependencies,
+# resolving pyarrow binary wheel requirements cleanly on Python 3.14+.
+_openwebui_pip_install() {
+    local container="$1"
+    local home_dir="${BASE_DIR}/${container}"
+    local webui_dir="${home_dir}/.openwebui"
+
+    distrobox enter "${container}" -- bash -c "
+        set -e
+        ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
+        source '${webui_dir}/.venv/bin/activate'
+        export PIP_CACHE_DIR='${home_dir}/.cache/pip'
+        export PIP_PROGRESS_BAR=on
+        mkdir -p \"\${PIP_CACHE_DIR}\"
+        pip install --upgrade pip setuptools wheel
+        echo '     [1/2] Fetching Open WebUI package metadata...'
+        pip install --ignore-requires-python --no-deps --upgrade open-webui
+        echo '     [2/2] Resolving and installing Open WebUI dependencies (Python 3.14 compatible)...'
+        python3 -c '
+import glob, importlib.metadata, os, re, site, subprocess, sys
+
+for sp in site.getsitepackages():
+    for md in glob.glob(os.path.join(sp, \"open_webui-*.dist-info\", \"METADATA\")):
+        with open(md, \"r\", encoding=\"utf-8\") as f:
+            txt = f.read()
+        txt_new = re.sub(r\"(?m)^(Requires-Dist:\\s*pyarrow)==[^\\s;]+\", r\"\\1>=20.0.0\", txt)
+        if txt_new != txt:
+            with open(md, \"w\", encoding=\"utf-8\") as f:
+                f.write(txt_new)
+
+reqs = []
+for r in (importlib.metadata.requires(\"open-webui\") or []):
+    if \"extra ==\" in r:
+        continue
+    r = re.sub(r\"^pyarrow==[^\\s;]+\", \"pyarrow>=20.0.0\", r)
+    reqs.append(r)
+
+reqs.append(\"audioop-lts\")
+cmd = [sys.executable, \"-m\", \"pip\", \"install\", \"--ignore-requires-python\"] + reqs
+subprocess.check_call(cmd)
+'
+    "
+}
+
 install_openwebui() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
@@ -16,7 +61,7 @@ install_openwebui() {
 
     log_step "Installing system dependencies..."
     ensure_base_packages "${container}" \
-        git curl ca-certificates procps pciutils jq \
+        git curl ca-certificates procps pciutils jq ffmpeg \
         python3 python3-venv python3-dev python3-pip build-essential
 
     log_step "Creating Python virtual environment..."
@@ -29,15 +74,7 @@ install_openwebui() {
     "
 
     log_step "Installing Open WebUI via pip (this may take a few minutes)..."
-    distrobox enter "${container}" -- bash -c "
-        set -e
-        source '${webui_dir}/.venv/bin/activate'
-        export PIP_CACHE_DIR='${home_dir}/.cache/pip'
-        export PIP_PROGRESS_BAR=on
-        mkdir -p \"\${PIP_CACHE_DIR}\"
-        pip install --upgrade pip setuptools wheel
-        pip install open-webui
-    "
+    _openwebui_pip_install "${container}"
 
     mkdir -p "${webui_dir}/data" "${home_dir}/.run"
 
@@ -64,20 +101,12 @@ is_installed_openwebui() { [[ -d "${BASE_DIR}/$1/.openwebui" || -d "${BASE_DIR}/
 
 update_openwebui() {
     local container="$1"
-    local webui_dir="${BASE_DIR}/${container}/.openwebui"
+    local home_dir="${BASE_DIR}/${container}"
+    local webui_dir="${home_dir}/.openwebui"
     log_header "Updating Open WebUI → ${container}"
     steps_begin 1
     log_step "Updating Open WebUI via pip..."
-    distrobox enter "${container}" -- bash -c "
-        set -e
-        if [[ -f '${webui_dir}/.venv/bin/activate' ]]; then
-            source '${webui_dir}/.venv/bin/activate'
-        else
-            source '${webui_dir}/conda/bin/activate' openwebui
-        fi
-        export PIP_PROGRESS_BAR=on
-        pip install --upgrade open-webui
-    "
+    _openwebui_pip_install "${container}"
     steps_end
     if [[ "$(get_tool_status_in_container "${container}" openwebui)" == running* ]]; then
         log_warn "Open WebUI is running. Apply with: localai.sh restart ${container}:openwebui"
@@ -115,14 +144,12 @@ start_openwebui() {
         source '${home_dir}/.openwebui.user.env' 2>/dev/null || true
         if [[ -f \"\${WEBUI_DIR}/.venv/bin/activate\" ]]; then
             source \"\${WEBUI_DIR}/.venv/bin/activate\"
-        elif [[ -f \"\${WEBUI_DIR}/conda/bin/activate\" ]]; then
-            source \"\${WEBUI_DIR}/conda/bin/activate\" openwebui
         fi
         nohup open-webui serve >> '${log_f}' 2>&1 &
         echo \"\$!\" > '${pid_f}'
     "
 
-    start_service_in_container "${container}" "openwebui" "${port}" "python\|open-webui" "${start_script}" 20 "http://localhost:${port}"
+    start_service_in_container "${container}" "openwebui" "${port}" "python\|open-webui" "${start_script}" 60 "http://localhost:${port}"
 }
 
 stop_openwebui() {

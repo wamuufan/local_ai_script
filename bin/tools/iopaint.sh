@@ -43,6 +43,7 @@ install_iopaint() {
     distrobox enter "${container}" -- bash -c "
         set -e
         ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
         source '${iopaint_dir}/.venv/bin/activate'
         export PIP_CACHE_DIR='${home_dir}/.cache/pip'
         export PIP_PROGRESS_BAR=on
@@ -54,7 +55,7 @@ install_iopaint() {
         pip_install_torch torch torchvision
 
         echo 'Installing IOPaint package...'
-        pip install iopaint
+        pip_install_pkg iopaint audioop-lts
     "
 
     mkdir -p "${models_dir}" "${home_dir}/.run"
@@ -98,13 +99,11 @@ update_iopaint() {
     log_step "Updating IOPaint package via pip..."
     distrobox enter "${container}" -- bash -c "
         set -e
-        if [[ -f '${iopaint_dir}/.venv/bin/activate' ]]; then
-            source '${iopaint_dir}/.venv/bin/activate'
-        else
-            source '${iopaint_dir}/conda/bin/activate' iopaint
-        fi
+        ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
+        source '${iopaint_dir}/.venv/bin/activate'
         export PIP_PROGRESS_BAR=on
-        pip install --upgrade iopaint
+        pip_install_pkg --upgrade iopaint audioop-lts
     "
     steps_end
     if [[ "$(get_tool_status_in_container "${container}" iopaint)" == running* ]]; then
@@ -116,6 +115,7 @@ update_iopaint() {
 start_iopaint() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
+    local iopaint_dir="${home_dir}/iopaint"
     local pid_f; pid_f="$(pid_file "${container}" "iopaint")"
     local log_f="${LOG_DIR}/${container}/iopaint.log"
 
@@ -164,11 +164,7 @@ start_iopaint() {
         set -e
         source '${home_dir}/.iopaint.env' 2>/dev/null || true
         source '${home_dir}/.iopaint.user.env' 2>/dev/null || true
-        if [[ -f '${iopaint_dir}/.venv/bin/activate' ]]; then
-            source '${iopaint_dir}/.venv/bin/activate'
-        elif [[ -f \"\${IOPAINT_CONDA:-${iopaint_dir}/conda}/bin/activate\" ]]; then
-            source \"\${IOPAINT_CONDA:-${iopaint_dir}/conda}/bin/activate\" \"\${IOPAINT_ENV_NAME:-iopaint}\"
-        fi
+        source '${iopaint_dir}/.venv/bin/activate'
         nohup iopaint start \
             --host \"\${IOPAINT_HOST:-0.0.0.0}\" \
             --port \"\${IOPAINT_PORT:-${target_port}}\" \

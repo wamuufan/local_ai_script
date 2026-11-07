@@ -10,6 +10,20 @@ install_comfyui() {
     local home_dir="${BASE_DIR}/${container}"
     local comfy_dir="${home_dir}/comfyui"
 
+    ensure_nvidia_host_ready
+
+    local install_manager="true"
+    if [[ "${LOCALAI_NO_COMFYUI_MANAGER:-0}" == "1" ]]; then
+        install_manager="false"
+    else
+        local active_conf
+        if active_conf="$(resolve_config_file "${container}")"; then
+            local conf_mgr
+            conf_mgr="$(get_config_value "${active_conf}" "comfyui" "COMFYUI_INSTALL_MANAGER" 2>/dev/null || true)"
+            [[ "${conf_mgr,,}" == "false" || "${conf_mgr}" == "0" ]] && install_manager="false"
+        fi
+    fi
+
     log_header "Installing ComfyUI → ${container}"
     log_info "Estimated time: 5-20 min depending on network (PyTorch is the largest download)."
 
@@ -19,7 +33,7 @@ install_comfyui() {
         log_warn "Low disk space detected (<10 GB free on ${home_dir}). ComfyUI installation requires significant disk space."
     fi
 
-    steps_begin 6
+    steps_begin 7
 
     log_step "Installing system dependencies..."
     ensure_base_packages "${container}" \
@@ -66,6 +80,7 @@ install_comfyui() {
     distrobox enter "${container}" -- bash -c "
         set -e
         ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
         source '${comfy_dir}/.venv/bin/activate' || { echo 'Failed to activate Python virtual environment' >&2; exit 1; }
         export PIP_CACHE_DIR='${home_dir}/.cache/pip'
         export PIP_PROGRESS_BAR=on
@@ -82,8 +97,33 @@ install_comfyui() {
             echo '     Note: AMD ROCm or Intel Arc GPUs require manual PyTorch installation inside container shell.'
         fi
         echo '     [3/3] Installing ComfyUI requirements...'
-        pip install -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
+        pip_install_pkg -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
     "
+
+    if [[ "${install_manager}" == "true" ]]; then
+        log_step "Installing ComfyUI-Manager extension (custom_nodes/ComfyUI-Manager)..."
+        distrobox enter "${container}" -- bash -c "
+            set -e
+            ${CONTAINER_HELPERS}
+            export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
+            mkdir -p '${comfy_dir}/custom_nodes'
+            if [[ -d '${comfy_dir}/custom_nodes/ComfyUI-Manager/.git' ]]; then
+                echo '     ComfyUI-Manager git repository found, updating...'
+                git -C '${comfy_dir}/custom_nodes/ComfyUI-Manager' pull --ff-only --progress || true
+            else
+                echo '     Cloning ComfyUI-Manager...'
+                rm -rf '${comfy_dir}/custom_nodes/ComfyUI-Manager'
+                git clone --progress --depth=1 https://github.com/ltdrdata/ComfyUI-Manager.git '${comfy_dir}/custom_nodes/ComfyUI-Manager'
+            fi
+            if [[ -f '${comfy_dir}/custom_nodes/ComfyUI-Manager/requirements.txt' ]]; then
+                echo '     Installing ComfyUI-Manager dependencies...'
+                source '${comfy_dir}/.venv/bin/activate'
+                pip_install_pkg -r '${comfy_dir}/custom_nodes/ComfyUI-Manager/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
+            fi
+        "
+    else
+        log_step "Skipping ComfyUI-Manager installation (--no-install-comfyui-manager)..."
+    fi
 
     log_step "Creating model folders and writing runtime configuration..."
     mkdir -p \
@@ -127,7 +167,7 @@ update_comfyui() {
     local container="$1"
     local comfy_dir="${BASE_DIR}/${container}/comfyui"
     log_header "Updating ComfyUI → ${container}"
-    steps_begin 3
+    steps_begin 4
     log_step "Pulling latest ComfyUI source (git)..."
     distrobox enter "${container}" -- bash -c "
         set -e
@@ -144,9 +184,27 @@ update_comfyui() {
     log_step "Updating Python requirements..."
     distrobox enter "${container}" -- bash -c "
         set -e
+        ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
         source '${comfy_dir}/.venv/bin/activate'
         export PIP_PROGRESS_BAR=on
-        pip install -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
+        pip_install_pkg -r '${comfy_dir}/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
+    "
+    log_step "Updating ComfyUI-Manager (if installed)..."
+    distrobox enter "${container}" -- bash -c "
+        set -e
+        ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
+        if [[ -d '${comfy_dir}/custom_nodes/ComfyUI-Manager/.git' ]]; then
+            echo '     Updating ComfyUI-Manager...'
+            git -C '${comfy_dir}/custom_nodes/ComfyUI-Manager' pull --ff-only --progress || true
+            source '${comfy_dir}/.venv/bin/activate'
+            if [[ -f '${comfy_dir}/custom_nodes/ComfyUI-Manager/requirements.txt' ]]; then
+                pip_install_pkg -r '${comfy_dir}/custom_nodes/ComfyUI-Manager/requirements.txt' 'numpy>=1.25.0,<2.5' 'pillow>=10.1.0,<13.0.0'
+            fi
+        else
+            echo '     ComfyUI-Manager is not installed (skipping).'
+        fi
     "
     log_step "Checking if a restart is needed..."
     if [[ "$(get_tool_status_in_container "${container}" comfyui)" == running* ]]; then

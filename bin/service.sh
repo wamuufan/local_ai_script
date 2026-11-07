@@ -71,6 +71,9 @@ start_service_in_container() {
     local timeout="${6:-15}"
     local health_url="${7:-http://localhost:${target_port}}"
 
+    assert_container_exists "${container}"
+    ensure_nvidia_host_ready
+
     local home_dir="${BASE_DIR}/${container}"
     local pid_f; pid_f="$(pid_file "${container}" "${tool_name,,}")"
     local log_f="${LOG_DIR}/${container}/${tool_name,,}.log"

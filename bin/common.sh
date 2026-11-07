@@ -265,6 +265,29 @@ container_has_gpu() {
     distrobox enter "$1" -- bash -c "command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null" 2>/dev/null
 }
 
+ensure_nvidia_host_ready() {
+    require_cmd nvidia-smi || return 0
+
+    # 1. Wake up GPU and initialize /dev/nvidia-uvm without root via setuid nvidia-modprobe
+    if ! nvidia-smi >/dev/null 2>&1; then
+        log_warn "nvidia-smi failed on host. If you recently updated your kernel or NVIDIA drivers, please reboot your system."
+        return 0
+    fi
+    if [[ ! -e /dev/nvidia-uvm ]] && require_cmd nvidia-modprobe; then
+        nvidia-modprobe -u -c=0 2>/dev/null || true
+    fi
+    if [[ ! -e /dev/nvidia-uvm ]]; then
+        log_warn "Host /dev/nvidia-uvm device is missing (possible kernel/driver version mismatch after system update). A system reboot may be required for CUDA."
+    fi
+
+    # 2. Auto-generate user-space rootless CDI specification in ~/.config/cdi/nvidia.yaml (zero sudo required)
+    if require_cmd nvidia-ctk; then
+        local user_cdi="${XDG_CONFIG_HOME:-${HOME}/.config}/cdi/nvidia.yaml"
+        mkdir -p "$(dirname "${user_cdi}")" 2>/dev/null || true
+        nvidia-ctk cdi generate --output="${user_cdi}" >/dev/null 2>&1 || true
+    fi
+}
+
 ensure_base_packages() {
     local container="$1"
     shift
@@ -307,14 +330,24 @@ ensure_python_venv() {
     python3 -m venv "${venv_dir}"
     echo "     Virtual environment created."
 }
+pip_install_pkg() {
+    if [[ "${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}" == "1" ]]; then
+        pip install --ignore-requires-python "$@"
+    else
+        pip install "$@" || {
+            echo "     [!] Standard pip install failed (possible Requires-Python version cap); retrying with --ignore-requires-python..."
+            pip install --ignore-requires-python "$@"
+        }
+    fi
+}
 pip_install_torch() {
     # $@ = packages, e.g. torch torchvision torchaudio
     if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
         echo "     NVIDIA GPU detected — installing latest CUDA PyTorch (~2.5 GB download, please wait)..."
-        pip install "$@"
+        pip_install_pkg "$@"
     else
         echo "     No NVIDIA GPU detected — installing CPU-only PyTorch (~200 MB)..."
-        pip install "$@" --index-url https://download.pytorch.org/whl/cpu
+        pip_install_pkg "$@" --index-url https://download.pytorch.org/whl/cpu
     fi
 }
 '

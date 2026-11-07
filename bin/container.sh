@@ -53,6 +53,7 @@ cmd_container_new() {
     log_step "Creating Distrobox container (Ubuntu 26.04)..."
     local -a nvidia_args=()
     if [[ "${cpu_only}" == "false" ]] && require_cmd nvidia-smi; then
+        ensure_nvidia_host_ready
         nvidia_args=("--nvidia")
     fi
 
@@ -88,7 +89,7 @@ cmd_container_new() {
     log_success "Container '${name}' is ready."
     log_info    "Home directory : ${home_dir}"
     log_info    "Enter shell    : localai.sh shell ${name}"
-    log_info    "Install a tool : localai.sh install ${name} <tool>"
+    log_info    "Install a tool : localai.sh install ${name}:<tool>"
 }
 
 # ------------------------------------------------------------------------------

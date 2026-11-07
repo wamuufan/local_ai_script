@@ -39,6 +39,7 @@ install_whisper() {
     distrobox enter "${container}" -- bash -c "
         set -e
         ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
         source '${whisper_dir}/.venv/bin/activate'
         export PIP_CACHE_DIR='${home_dir}/.cache/pip'
         export PIP_PROGRESS_BAR=on
@@ -49,7 +50,7 @@ install_whisper() {
         echo '     [2/3] Installing PyTorch...'
         pip_install_torch torch torchvision torchaudio
         echo '     [3/3] Installing Speaches...'
-        pip install git+https://github.com/speaches-ai/speaches.git
+        pip_install_pkg audioop-lts git+https://github.com/speaches-ai/speaches.git
     "
 
     log_step "Writing runtime configuration..."
@@ -98,14 +99,12 @@ update_whisper() {
     log_step "Upgrading speaches and huggingface_hub via pip..."
     distrobox enter "${container}" -- bash -c "
         set -e
-        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
-            source '${whisper_dir}/.venv/bin/activate'
-        else
-            source '${whisper_dir}/conda/bin/activate' whisper
-        fi
+        ${CONTAINER_HELPERS}
+        export LOCALAI_IGNORE_REQUIRES_PYTHON='${LOCALAI_IGNORE_REQUIRES_PYTHON:-0}'
+        source '${whisper_dir}/.venv/bin/activate'
         old=\$(pip show speaches 2>/dev/null | grep '^Version:' | awk '{print \$2}')
         echo \"     Current speaches version: \${old:-unknown}\"
-        pip install --upgrade git+https://github.com/speaches-ai/speaches.git huggingface_hub
+        pip_install_pkg --upgrade audioop-lts git+https://github.com/speaches-ai/speaches.git huggingface_hub
         new=\$(pip show speaches 2>/dev/null | grep '^Version:' | awk '{print \$2}')
         if [[ \"\${old}\" == \"\${new}\" ]]; then
             echo \"     speaches is already up to date (\${new}).\"
@@ -136,7 +135,7 @@ pull_model_whisper() {
     local user_env="${home_dir}/.whisper.user.env"
     local model_cache="${whisper_dir}/models/hub/models--${model//\//--}"
 
-    if [[ ! -x "${whisper_dir}/.venv/bin/python" && ! -x "${whisper_dir}/conda/envs/whisper/bin/python" ]]; then
+    if [[ ! -x "${whisper_dir}/.venv/bin/python" ]]; then
         die "Whisper is not installed in '${container}'. Install it first: localai.sh install ${container}:whisper"
     fi
     
@@ -148,11 +147,7 @@ pull_model_whisper() {
     log_info "Interrupted downloads resume automatically when you re-run this command."
     distrobox enter "${container}" -- bash -c "
         set -e
-        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
-            source '${whisper_dir}/.venv/bin/activate'
-        else
-            source '${whisper_dir}/conda/bin/activate' whisper
-        fi
+        source '${whisper_dir}/.venv/bin/activate'
         export HF_HOME='${whisper_dir}/models'
         unset HF_HUB_DISABLE_PROGRESS_BARS
         if command -v hf &>/dev/null; then
@@ -228,6 +223,7 @@ list_models_whisper() {
 start_whisper() {
     local container="$1"
     local home_dir="${BASE_DIR}/${container}"
+    local whisper_dir="${home_dir}/whisper"
     local pid_f; pid_f="$(pid_file "${container}" "whisper")"
     local log_f="${LOG_DIR}/${container}/whisper.log"
     local user_env="${home_dir}/.whisper.user.env"
@@ -248,7 +244,7 @@ start_whisper() {
         echo "${saved_model_line}" >> "${user_env}"
     fi
 
-    # Config değerlerini okuyalım
+    # Read configuration values
     local target_port="8083"
     local target_model=""
     
@@ -268,11 +264,7 @@ start_whisper() {
         set -e
         source '${home_dir}/.whisper.env' 2>/dev/null || true
         source '${home_dir}/.whisper.user.env' 2>/dev/null || true
-        if [[ -f '${whisper_dir}/.venv/bin/activate' ]]; then
-            source '${whisper_dir}/.venv/bin/activate'
-        elif [[ -f \"\${WHISPER_CONDA:-${whisper_dir}/conda}/bin/activate\" ]]; then
-            source \"\${WHISPER_CONDA:-${whisper_dir}/conda}/bin/activate\" \"\${WHISPER_ENV_NAME:-whisper}\"
-        fi
+        source '${whisper_dir}/.venv/bin/activate'
         
         export UVICORN_HOST=\"\${WHISPER_HOST:-0.0.0.0}\"
         export UVICORN_PORT=\"\${WHISPER_PORT:-${target_port}}\"
@@ -309,7 +301,7 @@ uninstall_whisper() {
     log_step "Removing Whisper application directory and virtualenv..."
     # Keep models directory by default to save bandwidth, unless purged
     run_with_spinner "Deleting virtual environment and config files" \
-        rm -rf "${home_dir}/whisper/.venv" "${home_dir}/whisper/conda" "${home_dir}/.whisper.env" "${home_dir}/.whisper.user.env"
+        rm -rf "${home_dir}/whisper/.venv" "${home_dir}/.whisper.env" "${home_dir}/.whisper.user.env"
     steps_end
     log_info "Note: Downloaded models in ${home_dir}/whisper/models were kept. Delete them manually if you want to free up space."
 

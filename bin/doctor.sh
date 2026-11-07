@@ -50,7 +50,26 @@ cmd_doctor() {
 
     printf "\n${BOLD}Optional / GPU:${RESET}\n"
     _doctor_check_dep "nvidia-smi" "nvidia-smi (GPU)"  "Install NVIDIA drivers + Container Toolkit" "true" || true
+    _doctor_check_dep "nvidia-ctk" "nvidia-ctk (Toolkit)" "Install nvidia-container-toolkit" "true" || true
     _doctor_check_dep "nvcc"       "nvcc (CUDA)"        "Install CUDA toolkit" "true" || true
+
+    if require_cmd nvidia-smi; then
+        ensure_nvidia_host_ready
+        printf "  %-22s " "NVIDIA UVM device:"
+        if [[ -e /dev/nvidia-uvm ]]; then
+            printf "${GREEN}✓ active${RESET}\n"
+        else
+            printf "${YELLOW}⚠ missing (reboot if kernel was updated, or install nvidia-modprobe)${RESET}\n"
+        fi
+
+        printf "  %-22s " "NVIDIA CDI spec:"
+        local user_cdi="${XDG_CONFIG_HOME:-${HOME}/.config}/cdi/nvidia.yaml"
+        if [[ -f "${user_cdi}" || -f "/etc/cdi/nvidia.yaml" ]]; then
+            printf "${GREEN}✓ ready (rootless CDI)${RESET}\n"
+        else
+            printf "${YELLOW}⚠ not generated (install nvidia-container-toolkit)${RESET}\n"
+        fi
+    fi
 
     printf "\n${BOLD}Base directory:${RESET}\n"
     printf "  %-22s " "~/.local/containers:"

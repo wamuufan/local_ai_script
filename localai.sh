@@ -12,11 +12,11 @@
 #    localai.sh container new <name>
 #    localai.sh container list
 #    localai.sh container rm <name>
-#    localai.sh install <container> <tool>
-#    localai.sh start   <container> <tool>
-#    localai.sh stop    <container> <tool>
-#    localai.sh status  <container> <tool>
-#    localai.sh logs    <container> <tool>
+#    localai.sh install <container>:<tool>
+#    localai.sh start   <container>:<tool>
+#    localai.sh stop    <container>:<tool>
+#    localai.sh status  <container>:<tool>
+#    localai.sh logs    <container>:<tool>
 #    localai.sh shell   <container>
 #    localai.sh doctor
 # ==============================================================================
@@ -197,7 +197,30 @@ _expand_container_tools() {
 }
 
 cmd_install() {
-    _validate_target_args "Usage: localai.sh install <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
+    local LOCALAI_NO_COMFYUI_MANAGER=0
+    local LOCALAI_IGNORE_REQUIRES_PYTHON=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-install-comfyui-manager|--no-manager)
+                LOCALAI_NO_COMFYUI_MANAGER=1
+                shift
+                ;;
+            --ignore-requires-python)
+                LOCALAI_IGNORE_REQUIRES_PYTHON=1
+                shift
+                ;;
+            -*)
+                die "Unknown option for install: $1"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    export LOCALAI_NO_COMFYUI_MANAGER
+    export LOCALAI_IGNORE_REQUIRES_PYTHON
+
+    _validate_target_args "Usage: localai.sh install [--no-install-comfyui-manager] [--ignore-requires-python] <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
     for arg in "$@"; do
         local container="${arg%%:*}"
@@ -237,7 +260,24 @@ cmd_uninstall() {
 }
 
 cmd_update() {
-    _validate_target_args "Usage: localai.sh update <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
+    local LOCALAI_IGNORE_REQUIRES_PYTHON=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ignore-requires-python)
+                LOCALAI_IGNORE_REQUIRES_PYTHON=1
+                shift
+                ;;
+            -*)
+                die "Unknown option for update: $1"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    export LOCALAI_IGNORE_REQUIRES_PYTHON
+
+    _validate_target_args "Usage: localai.sh update [--ignore-requires-python] <container>:<tool1,tool2,...> [<container2>:<tool3,...> ...]" "$@"
 
     for arg in "$@"; do
         local container="${arg%%:*}"
@@ -633,8 +673,11 @@ ${BOLD}SERVICE & TOOL MANAGEMENT${RESET}
   ${CYAN}transcribe${RESET}      <container>:whisper <file> [--lang <lang>] [--format <format>]
       Transcribe an audio file using whisper. Output saved next to original file.
 
-  ${CYAN}install${RESET}         <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+  ${CYAN}install${RESET}         [--no-install-comfyui-manager] [--ignore-requires-python] <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
       Install tool(s) inside container(s) (idempotent / safe to re-run).
+      ${DIM}Options:${RESET}
+        ${CYAN}--no-install-comfyui-manager${RESET}, ${CYAN}--no-manager${RESET} : Skip ComfyUI-Manager installation.
+        ${CYAN}--ignore-requires-python${RESET}                      : Ignore Python version constraints during pip install.
       ${DIM}Available tools:${RESET}
         ${CYAN}• ollama${RESET}    ${DIM}: Local LLM runtime (Llama 3, Mistral, Gemma, etc.)     [Port: 11434]${RESET}
         ${CYAN}• comfyui${RESET}   ${DIM}: Node-based Generative AI & Stable Diffusion UI      [Port: 8188]${RESET}
@@ -646,8 +689,10 @@ ${BOLD}SERVICE & TOOL MANAGEMENT${RESET}
   ${CYAN}uninstall${RESET}       <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
       Uninstall tool(s) and remove application files from container(s).
 
-  ${CYAN}update${RESET}          <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
+  ${CYAN}update${RESET}          [--ignore-requires-python] <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
       Update tool(s) to their latest release inside container(s).
+      ${DIM}Options:${RESET}
+        ${CYAN}--ignore-requires-python${RESET}                      : Ignore Python version constraints during pip install.
 
   ${CYAN}start${RESET}           <container>:<tool1,tool2,...> [<container2>:<tool3,...>]
       Start tool(s) in background inside container(s) (PID double-start protected).
