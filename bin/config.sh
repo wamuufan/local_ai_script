@@ -205,38 +205,54 @@ extract_tool_config() {
     [[ -z "${mem_strategy}" ]] && mem_strategy="$(get_config_value "${conf_file}" "memory" "MEMORY_MANAGEMENT_STRATEGY" 2>/dev/null || true)"
     [[ -z "${mem_strategy}" ]] && mem_strategy="$(get_config_value "${conf_file}" "memory" "MEMORY_PROFILE" 2>/dev/null || true)"
 
-    if [[ -n "${mem_strategy}" ]]; then
-        _emit_memory_strategy_defaults "${mem_strategy}" "${section}"
-    fi
+    {
+        if [[ -n "${mem_strategy}" ]]; then
+            _emit_memory_strategy_defaults "${mem_strategy}" "${section}"
+        fi
 
-    # Parse INI section; user entries will override any preceding strategy exports
-    awk -v section="${section}" '
-        BEGIN { sec = "^[ \t]*\\[" section "\\][ \t]*$" }
-        $0 ~ sec { flag=1; next }
-        /^[ \t]*\[/ && flag { flag=0; next }
-        flag && /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=/ {
-            sub(/\r$/, "");
-            sub(/^[ \t]+/, "");
-            idx = index($0, "=");
-            key = substr($0, 1, idx-1);
-            val = substr($0, idx+1);
-            sub(/^[ \t]+/, "", val);
+        # Parse INI section; user entries will override any preceding strategy exports
+        awk -v section="${section}" '
+            BEGIN { sec = "^[ \t]*\\[" section "\\][ \t]*$" }
+            $0 ~ sec { flag=1; next }
+            /^[ \t]*\[/ && flag { flag=0; next }
+            flag && /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=/ {
+                sub(/\r$/, "");
+                sub(/^[ \t]+/, "");
+                idx = index($0, "=");
+                key = substr($0, 1, idx-1);
+                val = substr($0, idx+1);
+                sub(/^[ \t]+/, "", val);
 
-            if (val ~ /^"/) {
-                if (match(val, /^"([^"\\]|\\.)*"/)) {
-                    val = substr(val, 2, RLENGTH-2);
-                } else if (match(val, /^"[^"]*"/)) {
-                    val = substr(val, 2, RLENGTH-2);
+                if (val ~ /^"/) {
+                    if (match(val, /^"([^"\\]|\\.)*"/)) {
+                        val = substr(val, 2, RLENGTH-2);
+                    } else if (match(val, /^"[^"]*"/)) {
+                        val = substr(val, 2, RLENGTH-2);
+                    }
+                } else {
+                    sub(/[ \t]*#.*$/, "", val);
+                    sub(/[ \t]+$/, "", val);
                 }
-            } else {
-                sub(/[ \t]*#.*$/, "", val);
-                sub(/[ \t]+$/, "", val);
+                gsub(/\\/, "\\\\", val);
+                gsub(/"/, "\\\"", val);
+                print "export " key "=\"" val "\""
             }
-            gsub(/\\/, "\\\\", val);
-            gsub(/"/, "\\\"", val);
-            print "export " key "=\"" val "\""
+        ' "${conf_file}"
+    } | awk -F'=' '
+        /^export [A-Za-z_][A-Za-z0-9_]*=/ {
+            k = $1
+            if (!(k in seen)) {
+                order[++n] = k
+                seen[k] = 1
+            }
+            val[k] = $0
         }
-    ' "${conf_file}"
+        END {
+            for (i = 1; i <= n; i++) {
+                print val[order[i]]
+            }
+        }
+    '
 }
 
 # Updates memory strategy and synchronized tool parameters in active localai.conf

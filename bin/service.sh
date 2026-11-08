@@ -26,7 +26,7 @@ check_and_clean_pid() {
         local old_pid
         old_pid="$(cat "${pid_f}" 2>/dev/null)" || { rm -f "${pid_f}"; return 0; }
         _validate_pid "${old_pid}" "${pid_f}" || return 0
-        if distrobox enter "${container}" -- bash -c "kill -0 '${old_pid}'" 2>/dev/null; then
+        if distrobox enter "${container}" -- bash -c "kill -0 '${old_pid}' 2>/dev/null" 2>/dev/null; then
             if [[ -n "${expected_comm}" ]]; then
                 if ! distrobox enter "${container}" -- bash -c "ps -p '${old_pid}' -o comm= 2>/dev/null | grep -qiE '${expected_comm}'"; then
                     log_info "Stale PID file found (PID ${old_pid} does not match '${expected_comm}'), cleaning up..."
@@ -90,11 +90,20 @@ start_service_in_container() {
     fi
 
     log_action "Starting ${tool_name} in '${container}' (background)..."
-    # Launch in true detached daemon mode via podman exec -d to prevent session termination
     local current_user; current_user="$(id -un)"
+
+    # Ensure container is running and initialized before detached exec
+    if [[ "$(podman inspect -f '{{.State.Running}}' "${container}" 2>/dev/null || true)" != "true" ]]; then
+        log_info "Container '${container}' is stopped. Starting container first..."
+        if ! distrobox enter "${container}" -- true; then
+            log_error "Failed to initialize container '${container}'."
+            return 1
+        fi
+    fi
+
+    # Launch in true detached daemon mode via podman exec -d to prevent session termination
     if ! podman exec -d --user "${current_user}" --env "HOME=${home_dir}" --workdir "${home_dir}" "${container}" bash -c "${start_script}" 2>/dev/null; then
-        # Fallback to distrobox enter if podman direct exec is unavailable
-        log_debug "podman exec failed (container may be stopped); falling back to distrobox enter..."
+        log_debug "podman exec -d failed; falling back to distrobox enter with setsid..."
         if ! distrobox enter "${container}" -- bash -c "${start_script}"; then
             log_error "${tool_name} failed to start or stopped immediately. Check logs: ${log_f}"
             rm -f "${pid_f}"
@@ -226,7 +235,7 @@ status_service_in_container() {
         pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
         _validate_pid "${pid}" "${pid_f}" || return 0
 
-        if distrobox enter "${container}" -- bash -c "kill -0 '${pid}'" 2>/dev/null; then
+        if distrobox enter "${container}" -- bash -c "kill -0 '${pid}' 2>/dev/null" 2>/dev/null; then
             log_success "${tool_name} is RUNNING (PID ${pid})."
             log_info    "PID File: ${pid_f}"
             return 0
@@ -269,7 +278,7 @@ get_tool_status_in_container() {
         pid="$(cat "${pid_f}" 2>/dev/null || echo "")"
         if [[ "$pid" =~ ^[0-9]+$ ]]; then
             # Fast check on shared host PID namespace first (avoids podman lock contention)
-            if kill -0 "${pid}" 2>/dev/null || distrobox enter "${container}" -- bash -c "kill -0 '${pid}'" 2>/dev/null; then
+            if kill -0 "${pid}" 2>/dev/null || distrobox enter "${container}" -- bash -c "kill -0 '${pid}' 2>/dev/null" 2>/dev/null; then
                 echo "running (PID ${pid})"
                 return 0
             fi
@@ -418,7 +427,7 @@ wait_for_service() {
 
         # Early crash detection (host PID namespace first; confirm inside container once)
         if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
-            if [[ -n "${container}" ]] && distrobox enter "${container}" -- bash -c "kill -0 '${pid}'" 2>/dev/null; then
+            if [[ -n "${container}" ]] && distrobox enter "${container}" -- bash -c "kill -0 '${pid}' 2>/dev/null" 2>/dev/null; then
                 pid=""   # PID namespaces are not shared; stop checking from host
             else
                 (( is_tty )) && printf "\r\033[K"
